@@ -321,7 +321,10 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
       packOrdsToLongs(acceptedOrds, numOrds, combinedLongs, longOffset);
     }
 
-    return FilterBitsetHandle.create(combinedLongs, segBitOffsets, totalBits);
+    // Only the combined bitset is transported; cuVS recomputes the per-partition bit offsets from
+    // the index sizes. segBitOffsets is used above solely to pack each segment's slice (64-bit
+    // word-aligned), matching that recomputation.
+    return FilterBitsetHandle.create(combinedLongs);
   }
 
   /**

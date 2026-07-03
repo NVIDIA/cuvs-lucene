@@ -59,9 +59,8 @@ class FilterCuVSProvider implements CuVSProvider {
   }
 
   @Override
-  public FilterBitsetHandle newFilterBitsetHandle(
-      long[] combinedLongs, long[] partBitOffsets, long totalBits) {
-    return delegate.newFilterBitsetHandle(combinedLongs, partBitOffsets, totalBits);
+  public FilterBitsetHandle newFilterBitsetHandle(long[] combinedLongs) {
+    return delegate.newFilterBitsetHandle(combinedLongs);
   }
 
   @Override
