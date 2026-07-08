@@ -6,20 +6,10 @@
     <format>jar</format>
   </formats>
   <includeBaseDirectory>false</includeBaseDirectory>
-  <dependencySets>
-    <dependencySet>
+  <fileSets>
+    <fileSet>
+      <directory>${project.build.outputDirectory}</directory>
       <outputDirectory>/</outputDirectory>
-      <useProjectArtifact>true</useProjectArtifact>
-      <unpack>true</unpack>
-      <scope>runtime</scope>
-      <excludes>
-        <exclude>org.apache.lucene:*</exclude>
-      </excludes>
-    </dependencySet>
-  </dependencySets>
-  <containerDescriptorHandlers>
-    <containerDescriptorHandler>
-      <handlerName>metaInf-services</handlerName>
-    </containerDescriptorHandler>
-  </containerDescriptorHandlers>
+    </fileSet>
+  </fileSets>
 </assembly>

@@ -31,14 +31,28 @@ Build the PyLucene sidecar jar:
 mvn clean package -DskipTests
 ```
 
-Then add the generated PyLucene jar to `lucene.CLASSPATH` before starting the VM:
+Then start PyLucene with the base `cuvs-java` jar, the generated PyLucene
+sidecar jar, and PyLucene's own Lucene classpath:
 
 ```python
 import os
+from pathlib import Path
+
 import lucene
 
-cuvs_lucene_jar = "target/cuvs-lucene-26.06.0-jar-with-pylucene-dependencies.jar"
-lucene.initVM(classpath=os.pathsep.join([lucene.CLASSPATH, cuvs_lucene_jar]))
+cuvs_java_jar = Path(os.environ["CUVS_LUCENE_CUVS_JAVA_JAR"])
+cuvs_lucene_jar = next(
+    Path("target").glob("cuvs-lucene-*-jar-with-pylucene-dependencies.jar")
+)
+lucene.initVM(
+    classpath=os.pathsep.join(
+        [str(cuvs_java_jar), str(cuvs_lucene_jar), lucene.CLASSPATH]
+    ),
+    vmargs=[
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-modules=jdk.incubator.vector",
+    ],
+)
 
 from org.apache.lucene.codecs import Codec
 
@@ -46,11 +60,24 @@ codec = Codec.forName("Lucene101AcceleratedHNSWCodec")
 ```
 
 Use the returned `codec` with `IndexWriterConfig.setCodec(codec)`. The
-`jar-with-pylucene-dependencies` artifact includes `cuvs-lucene` and its non-Lucene
-runtime dependencies while leaving Lucene itself to PyLucene's own classpath. This
-avoids loading a second copy of Lucene classes into the embedded JVM. The regular
-`jar-with-dependencies` artifact also merges `META-INF/services` entries and is
-available for non-PyLucene Java applications that want a standalone jar.
+`jar-with-pylucene-dependencies` artifact includes only `cuvs-lucene` classes and
+service descriptors. PyLucene must provide Lucene classes, and the base
+multi-release `cuvs-java` jar must be present separately on the JVM classpath. Do
+not use a native classifier `cuvs-java` jar here unless you also want to rely on
+its embedded native libraries; the base jar uses native libraries from
+`LD_LIBRARY_PATH`/`java.library.path`.
+
+To run an end-to-end smoke test against a local PyLucene environment:
+
+```sh
+./ci/test_pylucene_smoke.sh
+```
+
+To run the same smoke through the GPU search codec with 2,000 documents:
+
+```sh
+./ci/test_pylucene_smoke.sh --gpu-e2e
+```
 
 ### Running Tests
 ```sh
