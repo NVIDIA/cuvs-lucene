@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
@@ -178,7 +178,7 @@ for descriptor in \
   "${services_dir}/META-INF/services/org.apache.lucene.codecs.Codec" \
   "${services_dir}/META-INF/services/org.apache.lucene.codecs.KnnVectorsFormat"; do
   if grep -q "^org\\.apache\\.lucene\\." "${descriptor}"; then
-    echo "${descriptor#${services_dir}/} advertises Lucene-owned providers." >&2
+    echo "${descriptor#"${services_dir}"/} advertises Lucene-owned providers." >&2
     exit 1
   fi
 done
