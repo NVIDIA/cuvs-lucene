@@ -88,7 +88,7 @@ dependencies:
       - output_types: conda
         packages:
           - c-compiler
-          - cmake>=3.30.4
+          - cmake>=4.0,<4.4
           - cuda-nvcc
           - maven
           - ninja
