@@ -8,6 +8,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,7 @@ import org.apache.lucene.search.TaskExecutor;
 public class LuceneProvider {
 
   static final Logger log = Logger.getLogger(LuceneProvider.class.getName());
+  private static final List<String> SUPPORTED_DELEGATE_CODEC_VERSIONS = List.of("101", "99");
 
   private static final String BASE = "org.apache.lucene.";
   private static String codecs = "codecs.lucene<version>.";
@@ -152,14 +154,20 @@ public class LuceneProvider {
       throws ClassNotFoundException {
     try {
       return Class.forName(defaultClassName);
-    } catch (ClassNotFoundException e) {
+    } catch (ClassNotFoundException defaultException) {
       // Load class from fallback package.
       try {
         return Class.forName(fallbackClassName);
-      } catch (ClassNotFoundException e1) {
-        // Should not reach here.
-        log.log(Level.SEVERE, "Unable to load class: " + fallbackClassName);
-        throw e1;
+      } catch (ClassNotFoundException fallbackException) {
+        ClassNotFoundException missing =
+            new ClassNotFoundException(
+                "Unable to load Lucene class. Tried "
+                    + defaultClassName
+                    + " and "
+                    + fallbackClassName);
+        missing.addSuppressed(defaultException);
+        missing.addSuppressed(fallbackException);
+        throw missing;
       }
     }
   }
@@ -179,18 +187,23 @@ public class LuceneProvider {
   }
 
   public static Codec getDefaultDelegateCodec() {
-    for (String version : List.of("101", "99")) {
+    List<String> failures = new ArrayList<>();
+    for (String version : SUPPORTED_DELEGATE_CODEC_VERSIONS) {
       try {
         return getCodec(version);
       } catch (ReflectiveOperationException
           | SecurityException
           | IllegalArgumentException
           | LinkageError e) {
+        failures.add("Lucene" + version + ": " + e.getMessage());
         log.log(Level.FINE, "Unable to load Lucene" + version + "Codec", e);
       }
     }
-    log.log(Level.FINE, "Falling back to the runtime default codec");
-    return Codec.getDefault();
+    throw new IllegalStateException(
+        "Unable to load a supported Lucene delegate codec. Tried "
+            + SUPPORTED_DELEGATE_CODEC_VERSIONS
+            + ". Failures: "
+            + failures);
   }
 
   public FlatVectorsFormat getLuceneFlatVectorsFormatInstance(FlatVectorsScorer scorer)

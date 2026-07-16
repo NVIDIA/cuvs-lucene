@@ -52,7 +52,19 @@ public class Lucene101AcceleratedHNSWCodec extends FilterCodec {
    */
   public Lucene101AcceleratedHNSWCodec(AcceleratedHNSWParams acceleratedHNSWParams)
       throws Exception {
-    this(NAME, LuceneProvider.getDefaultDelegateCodec());
+    this(NAME, LuceneProvider.getDefaultDelegateCodec(), acceleratedHNSWParams);
+  }
+
+  /**
+   * Constructor for subclasses that expose named accelerated HNSW configurations via SPI.
+   *
+   * @param name the codec's name
+   * @param delegate the delegate codec to filter
+   * @param acceleratedHNSWParams instance of {@link AcceleratedHNSWParams}
+   */
+  protected Lucene101AcceleratedHNSWCodec(
+      String name, Codec delegate, AcceleratedHNSWParams acceleratedHNSWParams) {
+    super(name, delegate);
     initializeFormat(acceleratedHNSWParams);
   }
 

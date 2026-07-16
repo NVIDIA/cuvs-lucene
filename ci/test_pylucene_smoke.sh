@@ -12,6 +12,10 @@ MVN_BIN="${MVN:-mvn}"
 PYTHON_BIN="${PYTHON:-python3}"
 SKIP_BUILD=0
 GPU_E2E=0
+PYLUCENE_CASES="${CUVS_LUCENE_PYLUCENE_CASES:-}"
+PYLUCENE_ROWS="${CUVS_LUCENE_PYLUCENE_ROWS:-}"
+PYLUCENE_DIMS="${CUVS_LUCENE_PYLUCENE_DIMS:-}"
+PYLUCENE_TOPK="${CUVS_LUCENE_PYLUCENE_TOPK:-}"
 
 for arg in "$@"; do
   case "${arg}" in
@@ -21,15 +25,38 @@ for arg in "$@"; do
     --no-build)
       SKIP_BUILD=1
       ;;
+    --cases=*)
+      PYLUCENE_CASES="${arg#--cases=}"
+      ;;
+    --rows=*)
+      PYLUCENE_ROWS="${arg#--rows=}"
+      ;;
+    --dims=*)
+      PYLUCENE_DIMS="${arg#--dims=}"
+      ;;
+    --topk=*)
+      PYLUCENE_TOPK="${arg#--topk=}"
+      ;;
     -h|--help)
-      echo "Usage: $0 [--no-build] [--gpu-e2e]"
+      echo "Usage: $0 [--no-build] [--gpu-e2e] [--cases=CASE[,CASE...]] [--rows=N] [--dims=N] [--topk=N]"
       echo
-      echo "Builds and checks the PyLucene sidecar jar, then runs examples/pylucene_smoke.py."
+      echo "Builds and checks the PyLucene sidecar jar, then runs the PyLucene pytest suite."
       echo "Set CUVS_LUCENE_PYLUCENE_JAR to test an existing sidecar jar."
       echo "Set CUVS_LUCENE_CUVS_JAVA_JAR to the base cuvs-java jar if it is not in ~/.m2."
       echo "Set PYTHON or MVN to override the Python or Maven executable."
       echo
-      echo "--gpu-e2e indexes 2,000 rows through CuVS2510GPUSearchCodec and requires cuVS native support."
+      echo "Case groups: gpu-basic, gpu-segments, cpu-hnsw, cagra-hnsw, algorithm-matrix, all."
+      echo "Core cases: smoke, hnsw, cagra, hnsw-single, cagra-single."
+      echo "Segment cases: hnsw-1seg, cagra-1seg, hnsw-10seg, cagra-10seg,"
+      echo "  hnsw-10seg-force-1, cagra-10seg-force-1,"
+      echo "  hnsw-100seg-force-10, cagra-100seg-force-10."
+      echo "CPU HNSW cases: hnsw-cpu, hnsw-cpu-single, hnsw-cpu-1seg,"
+      echo "  hnsw-cpu-10seg, hnsw-cpu-10seg-force-1,"
+      echo "  hnsw-cpu-100seg-force-10."
+      echo "CAGRA-to-HNSW cases: cagra-hnsw-1layer, cagra-hnsw-3layer."
+      echo "--gpu-e2e defaults to cases=all, base rows=2000, dims=32, topk=20."
+      echo "High-segment cases use at least 257 rows per segment to avoid expected cuVS graph-degree clamps."
+      echo "--gpu-e2e requires a PyLucene environment plus cuVS native support on a GPU machine."
       exit 0
       ;;
     *)
@@ -134,24 +161,47 @@ for service in \
   }
 done
 
-grep -qx "com/nvidia/cuvs/lucene/Lucene101AcceleratedHNSWCodec.class" "${entries_file}" || {
-  echo "Missing cuvs-lucene codec classes in ${sidecar_jar}" >&2
-  exit 1
-}
+for class_file in \
+  "com/nvidia/cuvs/lucene/Lucene101AcceleratedHNSWCodec.class" \
+  "com/nvidia/cuvs/lucene/Lucene101AcceleratedHNSWBaseLayerCodec.class" \
+  "com/nvidia/cuvs/lucene/Lucene101AcceleratedHNSWMultiLayerCodec.class" \
+  "com/nvidia/cuvs/lucene/CuVS2510GPUSearchCodec.class" \
+  "com/nvidia/cuvs/lucene/LuceneAcceleratedHNSWBinaryQuantizedCodec.class" \
+  "com/nvidia/cuvs/lucene/LuceneAcceleratedHNSWScalarQuantizedCodec.class"; do
+  grep -qx "${class_file}" "${entries_file}" || {
+    echo "Missing cuvs-lucene class in ${sidecar_jar}: ${class_file}" >&2
+    exit 1
+  }
+done
 
-if grep -q "^org/apache/lucene/" "${entries_file}"; then
+lucene_entries="$(
+  grep "^org/apache/lucene/" "${entries_file}" \
+    | grep -v '/$' || true
+)"
+if [[ -n "${lucene_entries}" ]]; then
   echo "${sidecar_jar} contains org.apache.lucene classes; PyLucene must provide Lucene." >&2
+  echo "${lucene_entries}" >&2
   exit 1
 fi
 
-if grep -q "^com/nvidia/cuvs/" "${entries_file}" \
-  && grep "^com/nvidia/cuvs/" "${entries_file}" | grep -vq "^com/nvidia/cuvs/lucene/"; then
+flattened_cuvs_entries="$(
+  grep "^com/nvidia/cuvs/" "${entries_file}" \
+    | grep -v '/$' \
+    | grep -v "^com/nvidia/cuvs/lucene/" || true
+)"
+if [[ -n "${flattened_cuvs_entries}" ]]; then
   echo "${sidecar_jar} contains flattened cuvs-java classes; use the base cuvs-java jar separately." >&2
+  echo "${flattened_cuvs_entries}" >&2
   exit 1
 fi
 
-if grep -q "^META-INF/versions/.*/com/nvidia/cuvs/" "${entries_file}"; then
+flattened_multi_release_entries="$(
+  grep "^META-INF/versions/.*/com/nvidia/cuvs/" "${entries_file}" \
+    | grep -v '/$' || true
+)"
+if [[ -n "${flattened_multi_release_entries}" ]]; then
   echo "${sidecar_jar} contains flattened multi-release cuvs-java classes." >&2
+  echo "${flattened_multi_release_entries}" >&2
   exit 1
 fi
 
@@ -174,18 +224,49 @@ fi
     META-INF/services/org.apache.lucene.codecs.KnnVectorsFormat
 )
 
-for descriptor in \
-  "${services_dir}/META-INF/services/org.apache.lucene.codecs.Codec" \
-  "${services_dir}/META-INF/services/org.apache.lucene.codecs.KnnVectorsFormat"; do
+codec_descriptor="${services_dir}/META-INF/services/org.apache.lucene.codecs.Codec"
+format_descriptor="${services_dir}/META-INF/services/org.apache.lucene.codecs.KnnVectorsFormat"
+
+for descriptor in "${codec_descriptor}" "${format_descriptor}"; do
   if grep -q "^org\\.apache\\.lucene\\." "${descriptor}"; then
     echo "${descriptor#"${services_dir}"/} advertises Lucene-owned providers." >&2
     exit 1
   fi
 done
 
+for provider in \
+  "com.nvidia.cuvs.lucene.Lucene101AcceleratedHNSWCodec" \
+  "com.nvidia.cuvs.lucene.Lucene101AcceleratedHNSWBaseLayerCodec" \
+  "com.nvidia.cuvs.lucene.Lucene101AcceleratedHNSWMultiLayerCodec" \
+  "com.nvidia.cuvs.lucene.CuVS2510GPUSearchCodec" \
+  "com.nvidia.cuvs.lucene.LuceneAcceleratedHNSWBinaryQuantizedCodec" \
+  "com.nvidia.cuvs.lucene.LuceneAcceleratedHNSWScalarQuantizedCodec"; do
+  grep -qx "${provider}" "${codec_descriptor}" || {
+    echo "Codec service descriptor missing provider: ${provider}" >&2
+    exit 1
+  }
+done
+
+for provider in \
+  "com.nvidia.cuvs.lucene.CuVS2510GPUVectorsFormat" \
+  "com.nvidia.cuvs.lucene.Lucene99AcceleratedHNSWVectorsFormat" \
+  "com.nvidia.cuvs.lucene.LuceneAcceleratedHNSWBinaryQuantizedVectorsFormat" \
+  "com.nvidia.cuvs.lucene.LuceneAcceleratedHNSWScalarQuantizedVectorsFormat"; do
+  grep -qx "${provider}" "${format_descriptor}" || {
+    echo "KnnVectorsFormat service descriptor missing provider: ${provider}" >&2
+    exit 1
+  }
+done
+
 "${PYTHON_BIN}" -c "import lucene" >/dev/null 2>&1 || {
   echo "Python cannot import PyLucene's lucene module." >&2
   echo "Activate or install a PyLucene environment compatible with this project's Lucene version." >&2
+  exit 1
+}
+
+"${PYTHON_BIN}" -m pytest --version >/dev/null 2>&1 || {
+  echo "Python cannot run pytest." >&2
+  echo "Install pytest in the active PyLucene environment." >&2
   exit 1
 }
 
@@ -196,12 +277,27 @@ smoke_env=(
 
 if [[ "${GPU_E2E}" -eq 1 ]]; then
   smoke_env+=(
-    "CUVS_LUCENE_PYLUCENE_CODEC=CuVS2510GPUSearchCodec"
-    "CUVS_LUCENE_PYLUCENE_ROWS=2000"
-    "CUVS_LUCENE_PYLUCENE_DIMS=32"
-    "CUVS_LUCENE_PYLUCENE_TOPK=20"
-    "CUVS_LUCENE_EXPECT_CUVS_FILES=1"
+    "CUVS_LUCENE_PYLUCENE_CASES=${PYLUCENE_CASES:-all}"
+    "CUVS_LUCENE_PYLUCENE_ROWS=${PYLUCENE_ROWS:-2000}"
+    "CUVS_LUCENE_PYLUCENE_DIMS=${PYLUCENE_DIMS:-32}"
+    "CUVS_LUCENE_PYLUCENE_TOPK=${PYLUCENE_TOPK:-20}"
+    "CUVS_LUCENE_REQUIRE_CUVS=1"
+    "CUVS_LUCENE_VERIFY_ALL_CODECS=${CUVS_LUCENE_VERIFY_ALL_CODECS:-1}"
   )
+else
+  if [[ -n "${PYLUCENE_CASES}" ]]; then
+    smoke_env+=("CUVS_LUCENE_PYLUCENE_CASES=${PYLUCENE_CASES}")
+  fi
+  if [[ -n "${PYLUCENE_ROWS}" ]]; then
+    smoke_env+=("CUVS_LUCENE_PYLUCENE_ROWS=${PYLUCENE_ROWS}")
+  fi
+  if [[ -n "${PYLUCENE_DIMS}" ]]; then
+    smoke_env+=("CUVS_LUCENE_PYLUCENE_DIMS=${PYLUCENE_DIMS}")
+  fi
+  if [[ -n "${PYLUCENE_TOPK}" ]]; then
+    smoke_env+=("CUVS_LUCENE_PYLUCENE_TOPK=${PYLUCENE_TOPK}")
+  fi
+  smoke_env+=("CUVS_LUCENE_VERIFY_ALL_CODECS=${CUVS_LUCENE_VERIFY_ALL_CODECS:-1}")
 fi
 
-env "${smoke_env[@]}" "${PYTHON_BIN}" examples/pylucene_smoke.py
+env "${smoke_env[@]}" "${PYTHON_BIN}" -m pytest -q -s examples/test_pylucene_smoke.py

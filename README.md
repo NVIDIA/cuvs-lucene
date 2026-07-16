@@ -69,16 +69,37 @@ not use a native classifier `cuvs-java` jar here unless you also want to rely on
 its embedded native libraries; the base jar uses native libraries from
 `LD_LIBRARY_PATH`/`java.library.path`.
 
-To run an end-to-end smoke test against a local PyLucene environment:
+To run the PyLucene pytest smoke suite against a local PyLucene environment:
 
 ```sh
 ./ci/test_pylucene_smoke.sh
 ```
 
-To run the same smoke through the GPU search codec with 2,000 documents:
+To run an expanded GPU end-to-end pytest suite through CPU HNSW,
+CAGRA-to-HNSW, and CAGRA search paths:
 
 ```sh
 ./ci/test_pylucene_smoke.sh --gpu-e2e
+```
+
+The expanded suite runs the `gpu-basic`, `gpu-segments`, `cpu-hnsw`, and
+`cagra-hnsw` case groups. The basic cases cover `hnsw`, `cagra`, `hnsw-single`,
+and `cagra-single`. The segment cases cover 1-segment indexes, 10-segment
+indexes, 10 segments force-merged to 1, and 100 segments force-merged to 10 for
+both HNSW and CAGRA. The CPU HNSW cases force the accelerated HNSW codec through
+its Lucene CPU fallback path in the same run, including 10 segments force-merged
+to 1 and 100 segments force-merged to 10. The CAGRA-to-HNSW cases explicitly
+cover one-layer and three-layer HNSW graphs built from CAGRA with NN_DESCENT,
+`graphDegree=32`, and `intermediateGraphDegree=64`. The base matrix uses 2,000
+documents and 32 dimensions; high-segment cases use at least 257 rows per
+segment to avoid expected cuVS graph-degree clamps on tiny per-segment datasets.
+The suite checks Lucene SPI discovery, sidecar packaging, index file suffixes
+(`.vex`/`.vem` for HNSW and `.vcag`/`.vemc` for CAGRA), indexed vector metadata,
+unfiltered KNN, filtered KNN, missing-vector documents, deletions, and force
+merge behavior. To run a subset or resize the test:
+
+```sh
+./ci/test_pylucene_smoke.sh --gpu-e2e --cases=gpu-segments --rows=5000 --dims=64 --topk=20
 ```
 
 ### Running Tests

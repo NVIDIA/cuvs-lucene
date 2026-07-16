@@ -4,6 +4,7 @@
  */
 package com.nvidia.cuvs.lucene;
 
+import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.isCpuHnswFallbackForced;
 import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.isSupported;
 
 import com.nvidia.cuvs.LibraryException;
@@ -28,6 +29,17 @@ public class Lucene99AcceleratedHNSWVectorsFormat extends KnnVectorsFormat {
 
   private static final Logger log =
       Logger.getLogger(Lucene99AcceleratedHNSWVectorsFormat.class.getName());
+  public static final String LAST_WRITER_PATH_PROPERTY = "cuvs.lucene.lastHnswWriterPath";
+  public static final String LAST_HNSW_LAYERS_PROPERTY = "cuvs.lucene.lastHnswLayers";
+  public static final String LAST_CAGRA_GRAPH_BUILD_ALGO_PROPERTY =
+      "cuvs.lucene.lastHnswCagraGraphBuildAlgo";
+  public static final String LAST_CAGRA_GRAPH_DEGREE_PROPERTY =
+      "cuvs.lucene.lastHnswCagraGraphDegree";
+  public static final String LAST_CAGRA_INTERMEDIATE_GRAPH_DEGREE_PROPERTY =
+      "cuvs.lucene.lastHnswCagraIntermediateGraphDegree";
+  public static final String WRITER_PATH_GPU = "gpu-hnsw";
+  public static final String WRITER_PATH_CPU_FORCED = "cpu-hnsw-fallback";
+  public static final String WRITER_PATH_CPU_AUTO = "cpu-hnsw-auto-fallback";
   private static final FlatVectorsFormat FLAT_VECTORS_FORMAT;
   private static final int MAX_DIMENSIONS = 4096;
   private final AcceleratedHNSWParams acceleratedHNSWParams;
@@ -75,13 +87,32 @@ public class Lucene99AcceleratedHNSWVectorsFormat extends KnnVectorsFormat {
   @Override
   public KnnVectorsWriter fieldsWriter(SegmentWriteState state) throws IOException {
     var flatWriter = FLAT_VECTORS_FORMAT.fieldsWriter(state);
+    System.setProperty(
+        LAST_HNSW_LAYERS_PROPERTY, Integer.toString(acceleratedHNSWParams.getHnswLayers()));
+    System.setProperty(
+        LAST_CAGRA_GRAPH_BUILD_ALGO_PROPERTY,
+        acceleratedHNSWParams.getCagraGraphBuildAlgo().name());
+    System.setProperty(
+        LAST_CAGRA_GRAPH_DEGREE_PROPERTY,
+        Integer.toString(acceleratedHNSWParams.getGraphdegree()));
+    System.setProperty(
+        LAST_CAGRA_INTERMEDIATE_GRAPH_DEGREE_PROPERTY,
+        Integer.toString(acceleratedHNSWParams.getIntermediateGraphDegree()));
     if (isSupported()) {
+      System.setProperty(LAST_WRITER_PATH_PROPERTY, WRITER_PATH_GPU);
       log.log(Level.FINE, "cuVS is supported so using the Lucene99AcceleratedHNSWVectorsWriter");
       return new Lucene99AcceleratedHNSWVectorsWriter(state, acceleratedHNSWParams, flatWriter);
     } else {
+      boolean forcedCpuFallback = isCpuHnswFallbackForced();
+      System.setProperty(
+          LAST_WRITER_PATH_PROPERTY,
+          forcedCpuFallback ? WRITER_PATH_CPU_FORCED : WRITER_PATH_CPU_AUTO);
       log.log(
-          Level.WARNING,
-          "GPU based indexing not supported, falling back to using the Lucene99HnswVectorsWriter");
+          forcedCpuFallback ? Level.FINE : Level.WARNING,
+          forcedCpuFallback
+              ? "Forced CPU HNSW fallback, using the Lucene99HnswVectorsWriter"
+              : "GPU based indexing not supported, falling back to using the"
+                  + " Lucene99HnswVectorsWriter");
       try {
         return LUCENE_PROVIDER.getLuceneHnswVectorsWriterInstance(
             state,

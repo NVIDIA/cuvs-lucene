@@ -7,9 +7,10 @@ package com.nvidia.cuvs.lucene;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import java.util.Set;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.hnsw.FlatVectorsFormat;
 import org.junit.Test;
@@ -42,21 +43,30 @@ public class TestBackCompat {
   }
 
   @Test
-  public void testProviderCachesByVersion() throws Exception {
+  public void testProviderCachesSupportedVersion() throws Exception {
     LuceneProvider provider99 = LuceneProvider.getInstance("99");
-    LuceneProvider provider102 = LuceneProvider.getInstance("102");
-    assertNotSame(provider99, provider102);
+    assertSame(provider99, LuceneProvider.getInstance("99"));
+  }
+
+  @Test(expected = ClassNotFoundException.class)
+  public void testProviderDoesNotPretendLucene102IsACompleteProviderVersion() throws Exception {
+    LuceneProvider.getInstance("102");
   }
 
   @Test
   public void testDefaultDelegateCodec() {
-    assertNotNull(LuceneProvider.getDefaultDelegateCodec());
+    Codec delegate = LuceneProvider.getDefaultDelegateCodec();
+    assertNotNull(delegate);
+    assertTrue(Set.of("Lucene101", "Lucene99").contains(delegate.getName()));
+    assertTrue(delegate.getClass().getName().startsWith("org.apache.lucene."));
   }
 
   @Test
   public void testServiceLoadedCodecsCanBeInstantiated() {
     String[] codecNames = {
       "Lucene101AcceleratedHNSWCodec",
+      "Lucene101AcceleratedHNSWBaseLayerCodec",
+      "Lucene101AcceleratedHNSWMultiLayerCodec",
       "CuVS2510GPUSearchCodec",
       "Lucene101AcceleratedHNSWBinaryQuantizedCodec",
       "Lucene101AcceleratedHNSWScalarQuantizedCodec"
