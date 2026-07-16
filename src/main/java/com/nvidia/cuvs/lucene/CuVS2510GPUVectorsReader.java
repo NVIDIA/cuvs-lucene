@@ -604,21 +604,6 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
   }
 
   /**
-   * Maps a local segment ordinal to a Lucene doc ID within this segment.
-   *
-   * <p>Used by {@link GPUKnnFloatVectorQuery} after a multi-segment GPU search to convert
-   * select_k result ordinals to doc IDs before adding {@code docBase}.
-   *
-   * @param field   the vector field name
-   * @param ordinal the local ordinal returned by CAGRA
-   * @return the Lucene doc ID within this segment
-   * @throws IOException if the vector values cannot be read
-   */
-  public int ordToDoc(String field, int ordinal) throws IOException {
-    return flatVectorsReader.getFloatVectorValues(field).ordToDoc(ordinal);
-  }
-
-  /**
    * Returns the {@link CagraIndex} for the given field, or {@code null} if unavailable
    * (e.g., during a merge or when the field is missing).
    *

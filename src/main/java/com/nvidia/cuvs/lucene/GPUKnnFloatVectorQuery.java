@@ -201,15 +201,22 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
         }
 
         // Map (segmentIdx, ordinal) → global Lucene doc ID; compute normalized score.
+        // Stash FloatVectorValues per segment: results.count() can be far larger than the
+        // number of segments, and getFloatVectorValues() allocates on each call.
+        FloatVectorValues[] segVectorValues = new FloatVectorValues[leaves.size()];
         scoreDocs = new ScoreDoc[results.count()];
         for (int j = 0; j < results.count(); j++) {
           int segIdx = results.getPartitionIndex(j);
           int ordinal = results.getOrdinal(j);
           float dist = results.getDistance(j);
 
+          FloatVectorValues fvv = segVectorValues[segIdx];
+          if (fvv == null) {
+            fvv = gpuReaders.get(segIdx).getFloatVectorValues(field);
+            segVectorValues[segIdx] = fvv;
+          }
           LeafReaderContext ctx = leaves.get(segIdx);
-          int localDoc = gpuReaders.get(segIdx).ordToDoc(field, ordinal);
-          int globalDoc = ctx.docBase + localDoc;
+          int globalDoc = ctx.docBase + fvv.ordToDoc(ordinal);
           float score = 1.0f / (1.0f + dist);
           scoreDocs[j] = new ScoreDoc(globalDoc, score);
         }
