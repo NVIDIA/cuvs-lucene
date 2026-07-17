@@ -154,16 +154,16 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
         break;
       }
     }
-    FilterBitsetHandle filterHandle = null;
-    if (hasExplicitFilter || hasDeletes) {
-      filterHandle = buildOrGetCachedFilterHandle(indexSearcher, leaves, gpuReaders);
-    }
-
     // Build the per-segment CagraIndex list (one entry per Lucene segment / cuVS partition).
     CuVSResources resources = getCuVSResourcesInstance();
     List<CagraIndex> cagraIndices = new ArrayList<>(leaves.size());
 
+    FilterBitsetHandle filterHandle = null;
     try {
+      if (hasExplicitFilter || hasDeletes) {
+        filterHandle = buildOrGetCachedFilterHandle(indexSearcher, leaves, gpuReaders);
+      }
+
       float[] target = getTargetCopy();
       CagraSearchParams searchParams =
           new CagraSearchParams.Builder()
@@ -230,6 +230,10 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
       if (t instanceof IOException) throw (IOException) t;
       if (t instanceof RuntimeException) throw (RuntimeException) t;
       throw new RuntimeException("Multi-segment GPU search failed", t);
+    } finally {
+      // Release this query's reference. A cached handle is kept alive by the cache's own reference
+      // until eviction; an uncacheable handle holds only this reference and is freed here.
+      if (filterHandle != null) filterHandle.decRef();
     }
   }
 
@@ -261,6 +265,9 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
    *
    * <p>Cache key uses per-reader keys (not just core keys) so that liveDocs changes — which happen
    * when a reader is reopened after deletes — automatically invalidate the cached bitset.
+   *
+   * <p>The returned handle carries a reference the caller must release with {@link
+   * FilterBitsetHandle#decRef()} once the search completes.
    */
   private FilterBitsetHandle buildOrGetCachedFilterHandle(
       IndexSearcher indexSearcher,
@@ -272,18 +279,17 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
     for (LeafReaderContext ctx : leaves) {
       var helper = ctx.reader().getReaderCacheHelper();
       if (helper == null) {
-        // This reader can't be cached; build without caching.
+        // This reader can't be cached; build an uncached handle owned outright by the caller.
         return buildFilterHandle(indexSearcher, leaves, gpuReaders);
       }
       segReaderKeys.add(helper.getKey());
     }
 
-    FilterBitsetHandle cached = FilterBitsetCache.get(filter, segReaderKeys, field);
-    if (cached != null) return cached;
-
-    FilterBitsetHandle handle = buildFilterHandle(indexSearcher, leaves, gpuReaders);
-    FilterBitsetCache.put(filter, segReaderKeys, field, handle);
-    return handle;
+    return FilterBitsetCache.acquire(
+        filter,
+        segReaderKeys,
+        field,
+        () -> buildFilterHandle(indexSearcher, leaves, gpuReaders));
   }
 
   /**

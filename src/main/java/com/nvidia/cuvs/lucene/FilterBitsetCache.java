@@ -5,23 +5,45 @@
 package com.nvidia.cuvs.lucene;
 
 import com.nvidia.cuvs.FilterBitsetHandle;
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import org.apache.lucene.search.Query;
 
 /**
  * Shared LRU cache mapping (filter Query, per-segment reader keys, field) → {@link
  * FilterBitsetHandle}.
  *
- * <p>Host-side cache holding packed bitset arrays; the device-side upload is managed inside
- * {@link FilterBitsetHandle} itself (per-thread LRU). Entries are evicted in LRU order and closed
- * on eviction to free the host arrays and signal the device cache.
+ * <p>Host-side cache holding packed bitset arrays; the device-side upload is managed inside {@link
+ * FilterBitsetHandle} itself. Entries are evicted in LRU order.
+ *
+ * <h2>Concurrency</h2>
+ *
+ * <p>Values are stored as {@link CompletableFuture}s so that concurrent misses on the same key
+ * build the handle exactly once: the first thread inserts an incomplete future and builds; others
+ * find the future and await it (without holding the cache lock, so builds for different keys still
+ * run in parallel).
+ *
+ * <p>Lifetime is reference-counted (see {@link FilterBitsetHandle}). A cached handle carries one
+ * cache-owned reference, released via {@link FilterBitsetHandle#close()} when the entry is evicted.
+ * {@link #acquire} returns a handle with an <em>additional</em> reference already taken; the caller
+ * must {@link FilterBitsetHandle#decRef()} it after use. Because the free happens only when the last
+ * reference is dropped, an eviction concurrent with an in-flight search cannot free a handle still
+ * in use, and a replaced entry cannot leak.
  */
 final class FilterBitsetCache {
 
-  private static final int MAX_HOST_ENTRIES = 16;
+  static final int MAX_HOST_ENTRIES = 16;
+
+  /** Builds the handle for a key on a cache miss. */
+  @FunctionalInterface
+  interface FilterBuilder {
+    FilterBitsetHandle build() throws IOException;
+  }
 
   private record FilterCacheKey(Query filter, List<Object> segReaderKeys, String field) {
     @Override
@@ -38,12 +60,13 @@ final class FilterBitsetCache {
     }
   }
 
-  private static final LinkedHashMap<FilterCacheKey, FilterBitsetHandle> CACHE =
+  private static final LinkedHashMap<FilterCacheKey, CompletableFuture<FilterBitsetHandle>> CACHE =
       new LinkedHashMap<>(MAX_HOST_ENTRIES + 2, 0.75f, /* access-order= */ true) {
         @Override
-        protected boolean removeEldestEntry(Map.Entry<FilterCacheKey, FilterBitsetHandle> eldest) {
+        protected boolean removeEldestEntry(
+            Map.Entry<FilterCacheKey, CompletableFuture<FilterBitsetHandle>> eldest) {
           if (size() > MAX_HOST_ENTRIES) {
-            eldest.getValue().close();
+            releaseCacheRef(eldest.getValue());
             return true;
           }
           return false;
@@ -52,13 +75,67 @@ final class FilterBitsetCache {
 
   private FilterBitsetCache() {}
 
-  static synchronized FilterBitsetHandle get(
-      Query filter, List<Object> segReaderKeys, String field) {
-    return CACHE.get(new FilterCacheKey(filter, segReaderKeys, field));
+  /**
+   * Returns the handle for the given key, building it once if absent. The returned handle has a
+   * reference taken on the caller's behalf that must be released with {@link
+   * FilterBitsetHandle#decRef()} once the search completes.
+   */
+  static FilterBitsetHandle acquire(
+      Query filter, List<Object> segReaderKeys, String field, FilterBuilder builder)
+      throws IOException {
+    FilterCacheKey key = new FilterCacheKey(filter, segReaderKeys, field);
+    while (true) {
+      CompletableFuture<FilterBitsetHandle> future;
+      boolean owner = false;
+      synchronized (FilterBitsetCache.class) {
+        future = CACHE.get(key);
+        if (future == null) {
+          future = new CompletableFuture<>();
+          CACHE.put(key, future);
+          owner = true;
+        }
+      }
+
+      if (owner) {
+        // Build outside the cache lock so misses on other keys are not serialized behind this one.
+        try {
+          future.complete(builder.build());
+        } catch (Throwable t) {
+          // Drop the failed entry so a later call rebuilds, then propagate to this thread and any
+          // waiters (which observe the exception via join() and retry).
+          synchronized (FilterBitsetCache.class) {
+            CACHE.remove(key, future);
+          }
+          future.completeExceptionally(t);
+          if (t instanceof IOException io) throw io;
+          if (t instanceof RuntimeException re) throw re;
+          if (t instanceof Error err) throw err;
+          throw new RuntimeException(t);
+        }
+      }
+
+      FilterBitsetHandle handle;
+      try {
+        handle = future.join();
+      } catch (CompletionException e) {
+        // The owning thread's build failed and removed the entry; retry so exactly one thread
+        // rebuilds.
+        continue;
+      }
+
+      if (handle.tryIncRef()) {
+        return handle;
+      }
+      // Rare: the entry was evicted and its cache reference released between completion and our
+      // acquisition. It is already gone from the map, so retry and rebuild.
+    }
   }
 
-  static synchronized void put(
-      Query filter, List<Object> segReaderKeys, String field, FilterBitsetHandle handle) {
-    CACHE.put(new FilterCacheKey(filter, segReaderKeys, field), handle);
+  /** Releases the cache's reference once the (possibly in-flight) build completes. */
+  private static void releaseCacheRef(CompletableFuture<FilterBitsetHandle> future) {
+    future.whenComplete(
+        (handle, err) -> {
+          if (handle != null) handle.close();
+        });
   }
 }
