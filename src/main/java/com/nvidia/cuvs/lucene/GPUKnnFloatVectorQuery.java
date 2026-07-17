@@ -481,6 +481,7 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
 
                       @Override
                       public int advance(int target) {
+                        if (pos < 0) pos = 0;
                         while (pos < n && sortedDocs[pos] < target) pos++;
                         return docID();
                       }
