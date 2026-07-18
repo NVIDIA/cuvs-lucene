@@ -40,7 +40,6 @@ import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.tests.util.LuceneTestCase;
 import org.apache.lucene.tests.util.LuceneTestCase.SuppressSysoutChecks;
-import org.apache.lucene.tests.util.TestUtil;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -55,8 +54,10 @@ import org.junit.Test;
 @SuppressSysoutChecks(bugUrl = "")
 public class TestMultiSegmentGPUFilterConcurrency extends LuceneTestCase {
 
-  private static final Codec codec =
-      TestUtil.alwaysKnnVectorsFormat(new CuVS2510GPUVectorsFormat());
+  // Use the real GPU-search codec (returns the CuVS format directly, not wrapped) so the reader is
+  // a CuVS2510GPUVectorsReader and GPUKnnFloatVectorQuery takes the multi-partition GPU path rather
+  // than falling back to per-segment search.
+  private static Codec codec;
   private static final String VECTOR_FIELD = "vectors";
   private static final String CATEGORY_FIELD = "cat";
   // More categories than MAX_HOST_ENTRIES so distinct-filter churn forces cache eviction.
@@ -71,8 +72,9 @@ public class TestMultiSegmentGPUFilterConcurrency extends LuceneTestCase {
   private static List<Set<Integer>> acceptedDocsPerFilter;
 
   @BeforeClass
-  public static void beforeClass() throws IOException {
+  public static void beforeClass() throws Exception {
     assumeTrue("cuVS not supported", isSupported());
+    codec = new CuVS2510GPUSearchCodec();
 
     int datasetSize = 2000;
     int dimensions = 128;
