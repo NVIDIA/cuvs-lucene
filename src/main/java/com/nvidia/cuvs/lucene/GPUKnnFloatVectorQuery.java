@@ -20,6 +20,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import org.apache.lucene.codecs.KnnVectorsReader;
+import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.CodecReader;
 import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.FloatVectorValues;
@@ -60,7 +61,9 @@ import org.apache.lucene.util.FixedBitSet;
  * inside the handle itself across threads.
  *
  * <p>Falls back to the standard per-segment Lucene path when the optimized path cannot be
- * applied (mixed segment types or missing CAGRA index for the field on any segment).
+ * applied: mixed segment types, a missing CAGRA index for the field on any segment, or segments
+ * whose built CAGRA graphs differ in degree (a single multi-partition request requires a uniform
+ * graph degree, and a small segment can have its degree truncated at build time).
  *
  * @since 25.10
  */
@@ -131,12 +134,26 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
       return new MatchNoDocsQuery();
     }
 
-    // Collect a CuVS2510GPUVectorsReader for every segment; fall back if any segment
-    // lacks one or has no CAGRA index for this field.
+    // Collect a CuVS2510GPUVectorsReader for every segment; fall back if any segment lacks one,
+    // has no CAGRA index for this field, or has a CAGRA graph whose degree differs from the other
+    // segments'. The multi-partition search requires every partition to share one graph degree
+    // (a small segment can have its degree truncated at build time), so a non-uniform set is
+    // routed to the per-segment path instead.
     List<CuVS2510GPUVectorsReader> gpuReaders = new ArrayList<>(leaves.size());
+    long commonGraphDegree = -1;
     for (LeafReaderContext ctx : leaves) {
-      CuVS2510GPUVectorsReader gpuReader = unwrapGpuReader(ctx);
-      if (gpuReader == null || gpuReader.getCagraIndexForField(field) == null) {
+      CuVS2510GPUVectorsReader gpuReader = unwrapGpuReader(ctx, field);
+      if (gpuReader == null) {
+        return super.rewrite(indexSearcher);
+      }
+      CagraIndex cagraIndex = gpuReader.getCagraIndexForField(field);
+      if (cagraIndex == null) {
+        return super.rewrite(indexSearcher);
+      }
+      long graphDegree = cagraIndex.getGraphDegree();
+      if (commonGraphDegree == -1) {
+        commonGraphDegree = graphDegree;
+      } else if (graphDegree != commonGraphDegree) {
         return super.rewrite(indexSearcher);
       }
       gpuReaders.add(gpuReader);
@@ -417,10 +434,16 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
    * Unwraps the {@link LeafReaderContext}'s reader to a {@link CuVS2510GPUVectorsReader}, or
    * returns {@code null} if the reader is not of that type.
    */
-  private static CuVS2510GPUVectorsReader unwrapGpuReader(LeafReaderContext ctx) {
+  private static CuVS2510GPUVectorsReader unwrapGpuReader(LeafReaderContext ctx, String field) {
     var unwrapped = FilterLeafReader.unwrap(ctx.reader());
     if (!(unwrapped instanceof CodecReader)) return null;
     KnnVectorsReader vr = ((CodecReader) unwrapped).getVectorReader();
+    // A per-field codec wraps the vectors reader; unwrap to this field's delegate so the
+    // multi-partition GPU path is not silently bypassed when the CuVS format is used via
+    // PerFieldKnnVectorsFormat.
+    if (vr instanceof PerFieldKnnVectorsFormat.FieldsReader perField) {
+      vr = perField.getFieldReader(field);
+    }
     return (vr instanceof CuVS2510GPUVectorsReader gpuReader) ? gpuReader : null;
   }
 
