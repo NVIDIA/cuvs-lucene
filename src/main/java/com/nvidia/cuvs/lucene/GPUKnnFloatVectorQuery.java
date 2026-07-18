@@ -469,15 +469,18 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
             int[] localDocs = new int[scoreDocs.length];
             float[] localScores = new float[scoreDocs.length];
             int count = 0;
+            float max = Float.NEGATIVE_INFINITY;
             for (ScoreDoc sd : scoreDocs) {
               if (sd.doc >= base && sd.doc < maxDoc) {
                 localDocs[count] = sd.doc - base;
                 localScores[count] = sd.score * boost;
+                if (localScores[count] > max) max = localScores[count];
                 count++;
               }
             }
             if (count == 0) return null;
             final int n = count;
+            final float maxScore = max;
             Integer[] idx = new Integer[n];
             for (int i = 0; i < n; i++) idx[i] = i;
             Arrays.sort(idx, Comparator.comparingInt(i -> localDocs[i]));
@@ -524,7 +527,8 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
 
                   @Override
                   public float getMaxScore(int upTo) {
-                    return Float.MAX_VALUE;
+                    // The precomputed segment max is a valid upper bound for any upTo.
+                    return maxScore;
                   }
 
                   @Override
