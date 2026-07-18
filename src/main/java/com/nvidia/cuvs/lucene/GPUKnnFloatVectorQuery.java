@@ -244,9 +244,8 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
       }
 
     } catch (Throwable t) {
-      if (t instanceof IOException) throw (IOException) t;
-      if (t instanceof RuntimeException) throw (RuntimeException) t;
-      throw new RuntimeException("Multi-segment GPU search failed", t);
+      Utils.handleThrowable(t);
+      throw new AssertionError("handleThrowable always throws"); // unreachable
     } finally {
       // Release this query's reference. A cached handle is kept alive by the cache's own reference
       // until eviction; an uncacheable handle holds only this reference and is freed here.
@@ -334,7 +333,7 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
     for (int i = 0; i < numSegments; i++) {
       segBitOffsets[i] = totalBits;
       int numOrds = gpuReaders.get(i).getFloatVectorValues(field).size();
-      totalBits += ((long) (numOrds + 63) / 64) * 64;
+      totalBits += (((long) numOrds + 63) / 64) * 64;
     }
     long[] combinedLongs = new long[(int) (totalBits / 64)];
 
@@ -365,18 +364,8 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
       throws IOException {
     ScorerSupplier scorerSupplier = filterWeight.scorerSupplier(ctx);
     if (scorerSupplier == null) {
-      int maxDoc = ctx.reader().maxDoc();
-      return new Bits() {
-        @Override
-        public boolean get(int i) {
-          return false;
-        }
-
-        @Override
-        public int length() {
-          return maxDoc;
-        }
-      };
+      // No scorer: the filter matches no documents in this segment.
+      return new Bits.MatchNoBits(ctx.reader().maxDoc());
     }
 
     int maxDoc = ctx.reader().maxDoc();
