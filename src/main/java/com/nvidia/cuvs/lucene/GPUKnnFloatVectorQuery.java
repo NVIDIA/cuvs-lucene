@@ -557,7 +557,11 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
           public Explanation explain(LeafReaderContext ctx, int doc) {
             for (ScoreDoc sd : scoreDocs) {
               if (sd.doc == ctx.docBase + doc) {
-                return Explanation.match(sd.score, "GPU multi-segment CAGRA search");
+                return Explanation.match(
+                    sd.score * boost,
+                    "GPU multi-segment CAGRA search, product of:",
+                    Explanation.match(sd.score, "raw CAGRA score, 1 / (1 + distance)"),
+                    Explanation.match(boost, "boost"));
               }
             }
             return Explanation.noMatch("not a GPU search result");
