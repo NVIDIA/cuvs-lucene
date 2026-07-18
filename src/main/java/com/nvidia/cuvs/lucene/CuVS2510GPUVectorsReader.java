@@ -512,7 +512,11 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
         if (knnCollector.earlyTerminated()) {
           break;
         }
-        if (ord < 0) {
+        // Empty top-k slots (fewer than k passing candidates) carry a sentinel distance of FLT_MAX.
+        // Prefer this over the neighbor-index sentinel: the index sentinel is not uniform across
+        // CAGRA search algorithms (single-CTA emits 0x7FFFFFFF, multi-CTA 0xFFFFFFFF), so the
+        // distance is the reliable, algorithm-independent signal for an empty slot.
+        if (score == Float.MAX_VALUE) {
           continue;
         }
         float correctedScore = scoreCorrectionFunction.apply(score);
