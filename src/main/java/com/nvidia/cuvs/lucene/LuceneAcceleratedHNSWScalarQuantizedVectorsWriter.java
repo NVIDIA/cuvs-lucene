@@ -201,6 +201,9 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
       CuVSMatrix adjacencyListMatrix = cagraIndex.getGraph();
 
       int size = (int) dataset.size();
+      // The CAGRA graph degree is the adjacency list's column count (the degree cuVS actually
+      // built); it is what the HNSW meta records as the basis for M.
+      int graphDegree = (int) adjacencyListMatrix.columns();
       GPUBuiltHnswGraph hnswGraph =
           createMultiLayerHnswGraph(
               fieldInfo,
@@ -209,7 +212,6 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
               adjacencyListMatrix,
               unsignedVectors,
               acceleratedHNSWParams.getHnswLayers(),
-              acceleratedHNSWParams.getGraphdegree(),
               params,
               QuantizationType.SCALAR);
 
@@ -230,7 +232,7 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
           size,
           hnswGraph,
           graphLevelNodeOffsets,
-          acceleratedHNSWParams.getGraphdegree());
+          graphDegree);
 
       cagraIndex.close();
     } catch (Throwable t) {

@@ -170,6 +170,9 @@ public class Lucene99AcceleratedHNSWVectorsWriter extends KnnVectorsWriter {
       CuVSMatrix adjacencyListMatrix = cagraIndex.getGraph();
       int size = (int) dataset.size();
       int dimensions = fieldInfo.getVectorDimension();
+      // The HNSW M is derived from the CAGRA graph degree, which is the adjacency list's column
+      // count (the degree cuVS actually built), used both below and when writing the meta.
+      int graphDegree = (int) adjacencyListMatrix.columns();
       GPUBuiltHnswGraph hnswGraph =
           createMultiLayerHnswGraph(
               fieldInfo,
@@ -178,7 +181,6 @@ public class Lucene99AcceleratedHNSWVectorsWriter extends KnnVectorsWriter {
               adjacencyListMatrix,
               vectors,
               acceleratedHNSWParams.getHnswLayers(),
-              acceleratedHNSWParams.getGraphdegree(),
               params,
               QuantizationType.NONE);
       long vectorIndexOffset = hnswVectorIndex.getFilePointer();
@@ -193,7 +195,7 @@ public class Lucene99AcceleratedHNSWVectorsWriter extends KnnVectorsWriter {
           size,
           hnswGraph,
           graphLevelNodeOffsets,
-          acceleratedHNSWParams.getGraphdegree());
+          graphDegree);
       cagraIndex.close();
     } catch (Throwable t) {
       Utils.handleThrowable(t);

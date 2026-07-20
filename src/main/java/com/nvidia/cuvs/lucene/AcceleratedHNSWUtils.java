@@ -74,7 +74,8 @@ public class AcceleratedHNSWUtils {
 
   /**
    * Creates a multi-layer HNSW graph with dynamic number of layers.
-   * M = cagraGraphDegree/2
+   * M = ceil(cagraGraphDegree / 2), where cagraGraphDegree is the CAGRA adjacency list's degree
+   * (its column count). Ceil is used to accommodate odd graph degrees.
    * Each layer contains 1/M nodes from the previous layer
    * Creates layers until the highest layer has ≤ M nodes
    */
@@ -85,13 +86,11 @@ public class AcceleratedHNSWUtils {
       CuVSMatrix adjacencyListMatrix,
       List<?> vectors,
       int hnswLayers,
-      int graphDegree,
       CagraIndexParams params,
       QuantizationType quantization)
       throws Throwable {
 
-    // Calculate M as cagraGraphDegree/2
-    int M = graphDegree / 2;
+    int M = Math.ceilDiv((int) adjacencyListMatrix.columns(), 2);
 
     // Store all layers data
     List<int[]> layerNodes = new ArrayList<>();
@@ -320,7 +319,7 @@ public class AcceleratedHNSWUtils {
     meta.writeVLong(vectorIndexLength);
     meta.writeVInt(field.getVectorDimension());
     meta.writeInt(count);
-    meta.writeVInt(graphDegree / 2); // M = cagraGraphDegree/2
+    meta.writeVInt(Math.ceilDiv(graphDegree, 2)); // M = ceil(cagraGraphDegree / 2)
 
     // write graph nodes on each level
     if (graph == null) {

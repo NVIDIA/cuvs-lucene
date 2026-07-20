@@ -16,15 +16,15 @@ public class GPUSearchParams {
 
   public static enum Strategy {
     /*
-     * This strategy allows for automatic selection of the underlining CAGRA build algorithm.
-     * With this strategy we use NN_DESCENT for data set less then 5M vectors else we use IVF_PQ.
-     * Indexing parameters, especially for IVF_PQ, are heuristically identified automatically.
+     * This strategy lets cuVS auto-select the CAGRA build algorithm (and its parameters) for the
+     * given dataset.
      *
      * This is the default and the recommended strategy.
      */
     HEURISTIC,
     /*
      * This is an option when the end-user would want to use custom parameter values.
+     *
      * This strategy should only be used under expert guidance.
      */
     CUSTOM
@@ -77,8 +77,7 @@ public class GPUSearchParams {
    * @param cagraGraphBuildAlgo The CAGRA build algorithm to use.
    * @param indexType The type of index to build - CAGRA, BRUTEFORCE, or both.
    * @param cuVSIvfPqParams An instance of CuVSIvfPqParams containing IVF_PQ specific parameters.
-   * @param strategy either HEURISTIC [Default] that automatically chooses build algorithm and its parameters based on data set size or CUSTOM that uses the parameters passed though this class.
-   * @param heuristicType the heuristic type. The default option is SAME_GRAPH_FOOTPRINT.
+   * @param strategy either HEURISTIC [Default] that lets cuVS auto-select the build algorithm and its parameters or CUSTOM that uses the parameters passed though this class.
    * @param cuvsDistanceType the cuvsDistanceType. The default option is L2Expanded.
    * @param nnDescentNumIterations the number of Iterations to run if building with NN_DESCENT.
    */
