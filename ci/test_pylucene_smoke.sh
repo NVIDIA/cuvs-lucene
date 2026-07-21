@@ -16,6 +16,7 @@ PYLUCENE_CASES="${CUVS_LUCENE_PYLUCENE_CASES:-}"
 PYLUCENE_ROWS="${CUVS_LUCENE_PYLUCENE_ROWS:-}"
 PYLUCENE_DIMS="${CUVS_LUCENE_PYLUCENE_DIMS:-}"
 PYLUCENE_TOPK="${CUVS_LUCENE_PYLUCENE_TOPK:-}"
+CUVS_LUCENE_JAR_PATH="${CUVS_LUCENE_JAR:-}"
 
 for arg in "$@"; do
   case "${arg}" in
@@ -40,8 +41,8 @@ for arg in "$@"; do
     -h|--help)
       echo "Usage: $0 [--no-build] [--gpu-e2e] [--cases=CASE[,CASE...]] [--rows=N] [--dims=N] [--topk=N]"
       echo
-      echo "Builds and checks the PyLucene sidecar jar, then runs the PyLucene pytest suite."
-      echo "Set CUVS_LUCENE_PYLUCENE_JAR to test an existing sidecar jar."
+      echo "Builds and checks the standard cuvs-lucene jar, then runs the PyLucene pytest suite."
+      echo "Set CUVS_LUCENE_JAR to test an existing cuvs-lucene jar."
       echo "Set CUVS_LUCENE_CUVS_JAVA_JAR to the base cuvs-java jar if it is not in ~/.m2."
       echo "Set PYTHON or MVN to override the Python or Maven executable."
       echo
@@ -76,7 +77,7 @@ require_command() {
 require_command "${PYTHON_BIN}"
 require_command jar
 
-if [[ "${SKIP_BUILD}" -eq 0 && -z "${CUVS_LUCENE_PYLUCENE_JAR:-}" ]]; then
+if [[ "${SKIP_BUILD}" -eq 0 && -z "${CUVS_LUCENE_JAR_PATH}" ]]; then
   require_command "${MVN_BIN}"
   "${MVN_BIN}" clean package -DskipTests
 fi
@@ -90,24 +91,24 @@ if [[ -z "${project_version}" ]]; then
   exit 1
 fi
 
-if [[ -n "${CUVS_LUCENE_PYLUCENE_JAR:-}" ]]; then
-  sidecar_jar="${CUVS_LUCENE_PYLUCENE_JAR}"
+if [[ -n "${CUVS_LUCENE_JAR_PATH}" ]]; then
+  cuvs_lucene_jar="${CUVS_LUCENE_JAR_PATH}"
 else
-  sidecar_jar="target/cuvs-lucene-${project_version}-jar-with-pylucene-dependencies.jar"
+  cuvs_lucene_jar="target/cuvs-lucene-${project_version}.jar"
 fi
 
-if [[ ! -f "${sidecar_jar}" ]]; then
-  echo "PyLucene sidecar jar not found: ${sidecar_jar}" >&2
-  echo "Run without --no-build, or set CUVS_LUCENE_PYLUCENE_JAR to an existing jar." >&2
+if [[ ! -f "${cuvs_lucene_jar}" ]]; then
+  echo "cuvs-lucene jar not found: ${cuvs_lucene_jar}" >&2
+  echo "Run without --no-build, or set CUVS_LUCENE_JAR to an existing jar." >&2
   exit 1
 fi
 
-case "${sidecar_jar}" in
+case "${cuvs_lucene_jar}" in
   /*)
-    sidecar_jar_abs="${sidecar_jar}"
+    cuvs_lucene_jar_abs="${cuvs_lucene_jar}"
     ;;
   *)
-    sidecar_jar_abs="${REPO_ROOT}/${sidecar_jar}"
+    cuvs_lucene_jar_abs="${REPO_ROOT}/${cuvs_lucene_jar}"
     ;;
 esac
 
@@ -150,13 +151,13 @@ entries_file="$(mktemp)"
 services_dir="$(mktemp -d)"
 trap 'rm -f "${entries_file}"; rm -rf "${services_dir}"' EXIT
 
-jar tf "${sidecar_jar_abs}" >"${entries_file}"
+jar tf "${cuvs_lucene_jar_abs}" >"${entries_file}"
 
 for service in \
   "META-INF/services/org.apache.lucene.codecs.Codec" \
   "META-INF/services/org.apache.lucene.codecs.KnnVectorsFormat"; do
   grep -qx "${service}" "${entries_file}" || {
-    echo "Missing service descriptor in ${sidecar_jar}: ${service}" >&2
+    echo "Missing service descriptor in ${cuvs_lucene_jar}: ${service}" >&2
     exit 1
   }
 done
@@ -169,7 +170,7 @@ for class_file in \
   "com/nvidia/cuvs/lucene/LuceneAcceleratedHNSWBinaryQuantizedCodec.class" \
   "com/nvidia/cuvs/lucene/LuceneAcceleratedHNSWScalarQuantizedCodec.class"; do
   grep -qx "${class_file}" "${entries_file}" || {
-    echo "Missing cuvs-lucene class in ${sidecar_jar}: ${class_file}" >&2
+    echo "Missing cuvs-lucene class in ${cuvs_lucene_jar}: ${class_file}" >&2
     exit 1
   }
 done
@@ -179,7 +180,7 @@ lucene_entries="$(
     | grep -v '/$' || true
 )"
 if [[ -n "${lucene_entries}" ]]; then
-  echo "${sidecar_jar} contains org.apache.lucene classes; PyLucene must provide Lucene." >&2
+  echo "${cuvs_lucene_jar} contains org.apache.lucene classes; PyLucene must provide Lucene." >&2
   echo "${lucene_entries}" >&2
   exit 1
 fi
@@ -190,7 +191,7 @@ flattened_cuvs_entries="$(
     | grep -v "^com/nvidia/cuvs/lucene/" || true
 )"
 if [[ -n "${flattened_cuvs_entries}" ]]; then
-  echo "${sidecar_jar} contains flattened cuvs-java classes; use the base cuvs-java jar separately." >&2
+  echo "${cuvs_lucene_jar} contains flattened cuvs-java classes; use the base cuvs-java jar separately." >&2
   echo "${flattened_cuvs_entries}" >&2
   exit 1
 fi
@@ -200,7 +201,7 @@ flattened_multi_release_entries="$(
     | grep -v '/$' || true
 )"
 if [[ -n "${flattened_multi_release_entries}" ]]; then
-  echo "${sidecar_jar} contains flattened multi-release cuvs-java classes." >&2
+  echo "${cuvs_lucene_jar} contains flattened multi-release cuvs-java classes." >&2
   echo "${flattened_multi_release_entries}" >&2
   exit 1
 fi
@@ -211,7 +212,7 @@ extra_lucene_services="$(
     | grep -v "^META-INF/services/org.apache.lucene.codecs.KnnVectorsFormat$" || true
 )"
 if [[ -n "${extra_lucene_services}" ]]; then
-  echo "${sidecar_jar} contains unexpected Lucene service descriptors:" >&2
+  echo "${cuvs_lucene_jar} contains unexpected Lucene service descriptors:" >&2
   echo "${extra_lucene_services}" >&2
   exit 1
 fi
@@ -219,7 +220,7 @@ fi
 (
   cd "${services_dir}"
   jar xf \
-    "${sidecar_jar_abs}" \
+    "${cuvs_lucene_jar_abs}" \
     META-INF/services/org.apache.lucene.codecs.Codec \
     META-INF/services/org.apache.lucene.codecs.KnnVectorsFormat
 )
@@ -271,7 +272,7 @@ done
 }
 
 smoke_env=(
-  "CUVS_LUCENE_PYLUCENE_JAR=${sidecar_jar_abs}"
+  "CUVS_LUCENE_JAR=${cuvs_lucene_jar_abs}"
   "CUVS_LUCENE_CUVS_JAVA_JAR=${cuvs_java_jar}"
 )
 

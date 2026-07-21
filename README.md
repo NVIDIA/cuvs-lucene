@@ -27,14 +27,14 @@ Because PyLucene's generated Python module only exposes the Java classes it was 
 to wrap, use Lucene's service provider lookup to load `cuvs-lucene` codecs from
 Python instead of importing `com.nvidia.cuvs.lucene` classes directly.
 
-Build the PyLucene sidecar jar:
+Build the standard cuvs-lucene jar:
 
 ```sh
 mvn clean package -DskipTests
 ```
 
-Then start PyLucene with the base `cuvs-java` jar, the generated PyLucene
-sidecar jar, and PyLucene's own Lucene classpath:
+Then start PyLucene with the base `cuvs-java` jar, the standard `cuvs-lucene`
+jar, and PyLucene's own Lucene classpath:
 
 ```python
 import os
@@ -44,7 +44,10 @@ import lucene
 
 cuvs_java_jar = Path(os.environ["CUVS_LUCENE_CUVS_JAVA_JAR"])
 cuvs_lucene_jar = next(
-    Path("target").glob("cuvs-lucene-*-jar-with-pylucene-dependencies.jar")
+    jar
+    for jar in Path("target").glob("cuvs-lucene-*.jar")
+    if "-jar-with-" not in jar.name
+    and not jar.name.endswith(("-sources.jar", "-javadoc.jar"))
 )
 lucene.initVM(
     classpath=os.pathsep.join(
@@ -62,11 +65,11 @@ codec = Codec.forName("Lucene101AcceleratedHNSWCodec")
 ```
 
 Use the returned `codec` with `IndexWriterConfig.setCodec(codec)`. The
-`jar-with-pylucene-dependencies` artifact includes only `cuvs-lucene` classes and
-service descriptors. PyLucene must provide Lucene classes, and the base
-multi-release `cuvs-java` jar must be present separately on the JVM classpath. Do
-not use a native classifier `cuvs-java` jar here unless you also want to rely on
-its embedded native libraries; the base jar uses native libraries from
+The standard artifact includes `cuvs-lucene` classes and service descriptors.
+PyLucene must provide Lucene classes, and the base multi-release `cuvs-java` jar
+must be present separately on the JVM classpath. Do not use a native classifier
+`cuvs-java` jar here unless you also want to rely on its embedded native
+libraries; the base jar uses native libraries from
 `LD_LIBRARY_PATH`/`java.library.path`.
 
 To run the PyLucene pytest smoke suite against a local PyLucene environment:
@@ -93,7 +96,7 @@ cover one-layer and three-layer HNSW graphs built from CAGRA with NN_DESCENT,
 `graphDegree=32`, and `intermediateGraphDegree=64`. The base matrix uses 2,000
 documents and 32 dimensions; high-segment cases use at least 257 rows per
 segment to avoid expected cuVS graph-degree clamps on tiny per-segment datasets.
-The suite checks Lucene SPI discovery, sidecar packaging, index file suffixes
+The suite checks Lucene SPI discovery, jar packaging, index file suffixes
 (`.vex`/`.vem` for HNSW and `.vcag`/`.vemc` for CAGRA), indexed vector metadata,
 unfiltered KNN, filtered KNN, missing-vector documents, deletions, and force
 merge behavior. To run a subset or resize the test:

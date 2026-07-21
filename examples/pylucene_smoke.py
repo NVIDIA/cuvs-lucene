@@ -132,9 +132,7 @@ def suffixes_from_env():
 
 
 def find_cuvs_lucene_jar():
-    configured = os.environ.get("CUVS_LUCENE_PYLUCENE_JAR") or os.environ.get(
-        "CUVS_LUCENE_JAR"
-    )
+    configured = os.environ.get("CUVS_LUCENE_JAR")
     if configured:
         jar = Path(configured)
         if not jar.exists():
@@ -142,13 +140,16 @@ def find_cuvs_lucene_jar():
         return jar
 
     jars = sorted(
-        (REPO_ROOT / "target").glob(
-            "cuvs-lucene-*-jar-with-pylucene-dependencies.jar"
+        jar
+        for jar in (REPO_ROOT / "target").glob("cuvs-lucene-*.jar")
+        if not any(
+            marker in jar.name
+            for marker in ("-jar-with-", "-sources.jar", "-javadoc.jar")
         )
     )
     if not jars:
         raise FileNotFoundError(
-            "No PyLucene sidecar jar found under target/. "
+            "No cuvs-lucene jar found under target/. "
             "Run `mvn clean package -DskipTests` first."
         )
     return jars[-1]
