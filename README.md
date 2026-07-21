@@ -82,8 +82,8 @@ The script builds and validates the jar before invoking pytest. To invoke pytest
 directly against existing artifacts instead:
 
 ```sh
-CUVS_LUCENE_JAR=target/cuvs-lucene-26.08.0.jar \
-CUVS_LUCENE_CUVS_JAVA_JAR=/path/to/cuvs-java-26.08.0.jar \
+CUVS_LUCENE_JAR=/path/to/cuvs-lucene.jar \
+CUVS_LUCENE_CUVS_JAVA_JAR=/path/to/cuvs-java.jar \
 python3 -m pytest -q -s examples/Python/test_pylucene_smoke.py
 ```
 

@@ -36,7 +36,7 @@ public class TestBackCompat {
 
   @Test
   public void testExistingComponents() throws Exception {
-    LuceneProvider provider = LuceneProvider.getInstance("99");
+    LuceneProvider provider = LuceneProvider.getInstance(LuceneProvider.LUCENE_99_FORMAT_VERSION);
     assertTrue(provider.getLuceneFlatVectorsFormatInstance(null) instanceof FlatVectorsFormat);
     assertEquals(provider.getStaticIntParam("VERSION_CURRENT"), 0);
     assertNotEquals(provider.getSimilarityFunctions().size(), 0);
@@ -44,15 +44,19 @@ public class TestBackCompat {
 
   @Test
   public void testProviderCachesSupportedVersion() throws Exception {
-    LuceneProvider provider99 = LuceneProvider.getInstance("99");
-    assertSame(provider99, LuceneProvider.getInstance("99"));
+    LuceneProvider lucene99Provider =
+        LuceneProvider.getInstance(LuceneProvider.LUCENE_99_FORMAT_VERSION);
+    assertSame(
+        lucene99Provider, LuceneProvider.getInstance(LuceneProvider.LUCENE_99_FORMAT_VERSION));
   }
 
   @Test
   public void testProviderSupportsLucene102BinaryFormats() throws Exception {
-    LuceneProvider provider102 = LuceneProvider.getInstance("102");
-    assertNotNull(provider102.getLuceneBinaryQuantizedVectorsFormatInstance());
-    assertNotNull(provider102.getLuceneHnswBinaryQuantizedVectorsFormatInstance(16, 100));
+    LuceneProvider lucene102BinaryFormatProvider =
+        LuceneProvider.getInstance(LuceneProvider.LUCENE_102_BINARY_FORMAT_VERSION);
+    assertNotNull(lucene102BinaryFormatProvider.getLuceneBinaryQuantizedVectorsFormatInstance());
+    assertNotNull(
+        lucene102BinaryFormatProvider.getLuceneHnswBinaryQuantizedVectorsFormatInstance(16, 100));
   }
 
   @Test

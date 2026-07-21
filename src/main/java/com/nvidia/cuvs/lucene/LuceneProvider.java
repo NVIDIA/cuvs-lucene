@@ -35,7 +35,11 @@ import org.apache.lucene.search.TaskExecutor;
 public class LuceneProvider {
 
   static final Logger log = Logger.getLogger(LuceneProvider.class.getName());
-  private static final List<String> SUPPORTED_DELEGATE_CODEC_VERSIONS = List.of("101", "99");
+  static final String LUCENE_99_FORMAT_VERSION = "99";
+  static final String LUCENE_102_BINARY_FORMAT_VERSION = "102";
+
+  private static final List<String> SUPPORTED_DELEGATE_CODEC_VERSIONS =
+      List.of("101", LUCENE_99_FORMAT_VERSION);
 
   private static final String BASE = "org.apache.lucene.";
   private static String codecs = "codecs.lucene<version>.";
@@ -108,7 +112,7 @@ public class LuceneProvider {
   }
 
   private LuceneProvider(String version) throws ClassNotFoundException {
-    if ("102".equals(version)) {
+    if (LUCENE_102_BINARY_FORMAT_VERSION.equals(version)) {
       binaryQuantizedVectorsFormat =
           loadClass(
               setVersion(luceneBinaryQuantizedVectorsFormat, version),
@@ -296,13 +300,13 @@ public class LuceneProvider {
       int maxConn, int beamWidth) throws Exception {
     try {
       Constructor<?> luceneHnswBinaryQuantizedVectorsFormatConstructor =
-          hnswBinaryQuantizedVectorsFormat.getConstructor(Integer.TYPE, Integer.TYPE);
+          hnswBinaryQuantizedVectorsFormat.getConstructor(int.class, int.class);
       return (KnnVectorsFormat)
           luceneHnswBinaryQuantizedVectorsFormatConstructor.newInstance(maxConn, beamWidth);
     } catch (Exception e) {
       log.log(
           Level.SEVERE,
-          "Unable to initialize LuceneBinaryQuantizedVectorsFormat: " + e.getMessage());
+          "Unable to initialize LuceneHnswBinaryQuantizedVectorsFormat: " + e.getMessage());
       throw e;
     }
   }
