@@ -301,4 +301,4 @@ else
   smoke_env+=("CUVS_LUCENE_VERIFY_ALL_CODECS=${CUVS_LUCENE_VERIFY_ALL_CODECS:-1}")
 fi
 
-env "${smoke_env[@]}" "${PYTHON_BIN}" -m pytest -q -s examples/test_pylucene_smoke.py
+env "${smoke_env[@]}" "${PYTHON_BIN}" -m pytest -q -s examples/Python/test_pylucene_smoke.py

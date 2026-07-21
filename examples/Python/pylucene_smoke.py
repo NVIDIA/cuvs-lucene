@@ -10,7 +10,7 @@ from pathlib import Path
 import lucene
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 HNSW_CODEC = "Lucene101AcceleratedHNSWCodec"
 CAGRA_HNSW_BASE_LAYER_CODEC = "Lucene101AcceleratedHNSWBaseLayerCodec"
 CAGRA_HNSW_MULTI_LAYER_CODEC = "Lucene101AcceleratedHNSWMultiLayerCodec"
