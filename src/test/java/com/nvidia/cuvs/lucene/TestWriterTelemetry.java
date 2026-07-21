@@ -16,6 +16,9 @@ public class TestWriterTelemetry {
   @Test
   public void testCagraTelemetryIsComputedOnDemand() {
     assertEquals("writerPath=gpu-cagra", WriterTelemetry.forCagra());
+    assertEquals(
+        "CuVS2510GPUVectorsFormat(writerPath=gpu-cagra)",
+        new CuVS2510GPUVectorsFormat().toString());
     assertNull(System.getProperty("cuvs.lucene.lastCagraWriterPath"));
   }
 
@@ -36,6 +39,12 @@ public class TestWriterTelemetry {
               + "cagraGraphBuildAlgo=NN_DESCENT;cagraGraphDegree=32;"
               + "cagraIntermediateGraphDegree=64",
           WriterTelemetry.forHnsw(params));
+      assertEquals(
+          "Lucene99AcceleratedHNSWVectorsFormat("
+              + "writerPath=cpu-hnsw-fallback;hnswLayers=3;"
+              + "cagraGraphBuildAlgo=NN_DESCENT;cagraGraphDegree=32;"
+              + "cagraIntermediateGraphDegree=64)",
+          new Lucene99AcceleratedHNSWVectorsFormat(params).toString());
       assertNull(System.getProperty("cuvs.lucene.lastHnswWriterPath"));
       assertNull(System.getProperty("cuvs.lucene.lastHnswLayers"));
     } finally {

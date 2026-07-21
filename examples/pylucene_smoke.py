@@ -545,8 +545,11 @@ def verify_codecs_advertised(codec_class):
 
 def writer_telemetry(codec):
     vector_format = codec.knnVectorsFormat()
-    method = vector_format.getClass().getMethod("getWriterTelemetry", ())
-    payload = str(method.invoke(vector_format, ()))
+    description = str(vector_format)
+    _, separator, payload = description.partition("(")
+    if not separator or not payload.endswith(")"):
+        raise AssertionError(f"Malformed vector format diagnostics: {description!r}")
+    payload = payload[:-1]
     telemetry = {}
     for item in payload.split(";"):
         key, separator, value = item.partition("=")

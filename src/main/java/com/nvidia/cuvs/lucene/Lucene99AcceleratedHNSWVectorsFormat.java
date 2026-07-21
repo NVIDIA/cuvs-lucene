@@ -101,16 +101,9 @@ public class Lucene99AcceleratedHNSWVectorsFormat extends KnnVectorsFormat {
     }
   }
 
-  /**
-   * Returns an on-demand diagnostic snapshot for integration tests.
-   *
-   * <p>Normal indexing does not collect or publish telemetry. The PyLucene smoke suite invokes
-   * this method explicitly after indexing, avoiding shared mutable request state.
-   *
-   * @return semicolon-delimited writer diagnostics
-   */
-  public String getWriterTelemetry() {
-    return WriterTelemetry.forHnsw(acceleratedHNSWParams);
+  @Override
+  public String toString() {
+    return getName() + "(" + WriterTelemetry.forHnsw(acceleratedHNSWParams) + ")";
   }
 
   /**

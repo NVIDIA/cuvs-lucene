@@ -77,13 +77,9 @@ public class CuVS2510GPUVectorsFormat extends KnnVectorsFormat {
     return new CuVS2510GPUVectorsWriter(state, gpuSearchParams, flatWriter);
   }
 
-  /**
-   * Returns an on-demand diagnostic snapshot for integration tests.
-   *
-   * @return writer diagnostics
-   */
-  public String getWriterTelemetry() {
-    return WriterTelemetry.forCagra();
+  @Override
+  public String toString() {
+    return getName() + "(" + WriterTelemetry.forCagra() + ")";
   }
 
   /**
