@@ -64,8 +64,8 @@ from org.apache.lucene.codecs import Codec
 codec = Codec.forName("Lucene101AcceleratedHNSWCodec")
 ```
 
-Use the returned `codec` with `IndexWriterConfig.setCodec(codec)`. The
-The standard artifact includes `cuvs-lucene` classes and service descriptors.
+Use the returned `codec` with `IndexWriterConfig.setCodec(codec)`. The standard
+artifact includes `cuvs-lucene` classes and service descriptors.
 PyLucene must provide Lucene classes, and the base multi-release `cuvs-java` jar
 must be present separately on the JVM classpath. Do not use a native classifier
 `cuvs-java` jar here unless you also want to rely on its embedded native
@@ -75,14 +75,23 @@ libraries; the base jar uses native libraries from
 To run the PyLucene pytest smoke suite against a local PyLucene environment:
 
 ```sh
-./ci/test_pylucene_smoke.sh
+./test_pylucene.sh
+```
+
+The script builds and validates the jar before invoking pytest. To invoke pytest
+directly against existing artifacts instead:
+
+```sh
+CUVS_LUCENE_JAR=target/cuvs-lucene-26.08.0.jar \
+CUVS_LUCENE_CUVS_JAVA_JAR=/path/to/cuvs-java-26.08.0.jar \
+python3 -m pytest -q -s examples/test_pylucene_smoke.py
 ```
 
 To run an expanded GPU end-to-end pytest suite through CPU HNSW,
 CAGRA-to-HNSW, and CAGRA search paths:
 
 ```sh
-./ci/test_pylucene_smoke.sh --gpu-e2e
+./test_pylucene.sh --gpu-e2e
 ```
 
 The expanded suite runs the `gpu-basic`, `gpu-segments`, `cpu-hnsw`, and
@@ -102,7 +111,7 @@ unfiltered KNN, filtered KNN, missing-vector documents, deletions, and force
 merge behavior. To run a subset or resize the test:
 
 ```sh
-./ci/test_pylucene_smoke.sh --gpu-e2e --cases=gpu-segments --rows=5000 --dims=64 --topk=20
+./test_pylucene.sh --gpu-e2e --cases=gpu-segments --rows=5000 --dims=64 --topk=20
 ```
 
 ### Running Tests
