@@ -34,8 +34,6 @@ public class CuVS2510GPUVectorsFormat extends KnnVectorsFormat {
   public static final String CUVS_INDEX_EXT = "vcag";
   public static final int VERSION_START = 0;
   public static final int VERSION_CURRENT = VERSION_START;
-  public static final String LAST_WRITER_PATH_PROPERTY = "cuvs.lucene.lastCagraWriterPath";
-  public static final String WRITER_PATH_GPU = "gpu-cagra";
 
   private GPUSearchParams gpuSearchParams;
 
@@ -75,9 +73,17 @@ public class CuVS2510GPUVectorsFormat extends KnnVectorsFormat {
   @Override
   public KnnVectorsWriter fieldsWriter(SegmentWriteState state) throws IOException {
     assertIsSupported();
-    System.setProperty(LAST_WRITER_PATH_PROPERTY, WRITER_PATH_GPU);
     var flatWriter = FLAT_VECTORS_FORMAT.fieldsWriter(state);
     return new CuVS2510GPUVectorsWriter(state, gpuSearchParams, flatWriter);
+  }
+
+  /**
+   * Returns an on-demand diagnostic snapshot for integration tests.
+   *
+   * @return writer diagnostics
+   */
+  public String getWriterTelemetry() {
+    return WriterTelemetry.forCagra();
   }
 
   /**

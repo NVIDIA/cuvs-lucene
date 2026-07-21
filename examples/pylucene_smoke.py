@@ -76,14 +76,6 @@ MIN_ROWS_PER_SEGMENT_WITH_DEFAULT_GRAPH_PARAMS = 257
 # derived NN_DESCENT intermediate degree of 96 to avoid native clamp warnings.
 MIN_ROWS_FOR_THREE_HNSW_LAYERS_WITH_GRAPH_DEGREE_32 = 27316
 FORCE_CPU_HNSW_FALLBACK_PROPERTY = "cuvs.lucene.forceCpuHnswFallback"
-HNSW_WRITER_PATH_PROPERTY = "cuvs.lucene.lastHnswWriterPath"
-CAGRA_WRITER_PATH_PROPERTY = "cuvs.lucene.lastCagraWriterPath"
-HNSW_LAYERS_PROPERTY = "cuvs.lucene.lastHnswLayers"
-HNSW_CAGRA_GRAPH_BUILD_ALGO_PROPERTY = "cuvs.lucene.lastHnswCagraGraphBuildAlgo"
-HNSW_CAGRA_GRAPH_DEGREE_PROPERTY = "cuvs.lucene.lastHnswCagraGraphDegree"
-HNSW_CAGRA_INTERMEDIATE_GRAPH_DEGREE_PROPERTY = (
-    "cuvs.lucene.lastHnswCagraIntermediateGraphDegree"
-)
 
 
 @dataclass(frozen=True)
@@ -255,17 +247,11 @@ def print_threadlocal_provider_diagnostics():
     from java.lang import System
 
     print("ThreadLocalCuVSResourcesProvider diagnostics:")
-    for property_name in (
-        FORCE_CPU_HNSW_FALLBACK_PROPERTY,
-        HNSW_WRITER_PATH_PROPERTY,
-        CAGRA_WRITER_PATH_PROPERTY,
-        HNSW_LAYERS_PROPERTY,
-        HNSW_CAGRA_GRAPH_BUILD_ALGO_PROPERTY,
-        HNSW_CAGRA_GRAPH_DEGREE_PROPERTY,
-        HNSW_CAGRA_INTERMEDIATE_GRAPH_DEGREE_PROPERTY,
-    ):
-        value = System.getProperty(property_name)
-        print(f"  {property_name}={value if value is not None else '<unset>'}")
+    value = System.getProperty(FORCE_CPU_HNSW_FALLBACK_PROPERTY)
+    print(
+        f"  {FORCE_CPU_HNSW_FALLBACK_PROPERTY}="
+        f"{value if value is not None else '<unset>'}"
+    )
 
     source_path = (
         REPO_ROOT
@@ -557,15 +543,17 @@ def verify_codecs_advertised(codec_class):
             )
 
 
-def clear_writer_path_properties():
-    from java.lang import System
-
-    System.clearProperty(HNSW_WRITER_PATH_PROPERTY)
-    System.clearProperty(CAGRA_WRITER_PATH_PROPERTY)
-    System.clearProperty(HNSW_LAYERS_PROPERTY)
-    System.clearProperty(HNSW_CAGRA_GRAPH_BUILD_ALGO_PROPERTY)
-    System.clearProperty(HNSW_CAGRA_GRAPH_DEGREE_PROPERTY)
-    System.clearProperty(HNSW_CAGRA_INTERMEDIATE_GRAPH_DEGREE_PROPERTY)
+def writer_telemetry(codec):
+    vector_format = codec.knnVectorsFormat()
+    method = vector_format.getClass().getMethod("getWriterTelemetry", ())
+    payload = str(method.invoke(vector_format, ()))
+    telemetry = {}
+    for item in payload.split(";"):
+        key, separator, value = item.partition("=")
+        if not separator or not key:
+            raise AssertionError(f"Malformed writer telemetry item: {item!r}")
+        telemetry[key] = value
+    return telemetry
 
 
 def expected_writer_path(case):
@@ -578,15 +566,8 @@ def expected_writer_path(case):
     return None
 
 
-def observed_writer_path(case):
-    from java.lang import System
-
-    property_name = (
-        CAGRA_WRITER_PATH_PROPERTY
-        if case.codec_name == CAGRA_CODEC
-        else HNSW_WRITER_PATH_PROPERTY
-    )
-    observed = System.getProperty(property_name)
+def observed_writer_path(case, telemetry):
+    observed = telemetry.get("writerPath")
     expected = expected_writer_path(case)
     if expected is not None and observed != expected:
         raise AssertionError(
@@ -595,11 +576,9 @@ def observed_writer_path(case):
     return observed or "unknown"
 
 
-def assert_hnsw_telemetry(case):
-    from java.lang import System
-
+def assert_hnsw_telemetry(case, telemetry):
     if case.expected_hnsw_layers:
-        observed_layers = System.getProperty(HNSW_LAYERS_PROPERTY)
+        observed_layers = telemetry.get("hnswLayers")
         expected_layers = str(case.expected_hnsw_layers)
         if observed_layers != expected_layers:
             raise AssertionError(
@@ -608,7 +587,7 @@ def assert_hnsw_telemetry(case):
             )
 
     if case.expected_cagra_graph_build_algo:
-        observed_algo = System.getProperty(HNSW_CAGRA_GRAPH_BUILD_ALGO_PROPERTY)
+        observed_algo = telemetry.get("cagraGraphBuildAlgo")
         if observed_algo != case.expected_cagra_graph_build_algo:
             raise AssertionError(
                 f"{case.name}: expected CAGRA graph build algorithm "
@@ -616,7 +595,7 @@ def assert_hnsw_telemetry(case):
             )
 
     if case.expected_cagra_graph_degree:
-        observed_degree = System.getProperty(HNSW_CAGRA_GRAPH_DEGREE_PROPERTY)
+        observed_degree = telemetry.get("cagraGraphDegree")
         expected_degree = str(case.expected_cagra_graph_degree)
         if observed_degree != expected_degree:
             raise AssertionError(
@@ -625,9 +604,7 @@ def assert_hnsw_telemetry(case):
             )
 
     if case.expected_cagra_intermediate_graph_degree:
-        observed_intermediate_degree = System.getProperty(
-            HNSW_CAGRA_INTERMEDIATE_GRAPH_DEGREE_PROPERTY
-        )
+        observed_intermediate_degree = telemetry.get("cagraIntermediateGraphDegree")
         expected_intermediate_degree = str(case.expected_cagra_intermediate_graph_degree)
         if observed_intermediate_degree != expected_intermediate_degree:
             raise AssertionError(
@@ -866,7 +843,6 @@ def run_case(case, codec_class, codec_cache, jarray):
 
     with ExitStack() as stack:
         stack.enter_context(hnsw_cpu_fallback(case))
-        clear_writer_path_properties()
         index_path = stack.enter_context(
             tempfile.TemporaryDirectory(prefix=f"cuvs-lucene-pylucene-{case.name}-")
         )
@@ -928,8 +904,9 @@ def run_case(case, codec_class, codec_cache, jarray):
             searcher = IndexSearcher(reader)
             assert_search_results(searcher, jarray, case, query_ids, inactive_doc_names)
             assert_filtered_search(searcher, jarray, case, query_ids[0])
-            writer_path = observed_writer_path(case)
-            assert_hnsw_telemetry(case)
+            telemetry = writer_telemetry(codec)
+            writer_path = observed_writer_path(case, telemetry)
+            assert_hnsw_telemetry(case, telemetry)
         finally:
             reader.close()
             directory.close()
