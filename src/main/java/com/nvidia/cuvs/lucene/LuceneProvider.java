@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.lucene.codecs.Codec;
+import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.KnnVectorsWriter;
 import org.apache.lucene.codecs.hnsw.FlatVectorsFormat;
@@ -107,6 +108,18 @@ public class LuceneProvider {
   }
 
   private LuceneProvider(String version) throws ClassNotFoundException {
+    if ("102".equals(version)) {
+      binaryQuantizedVectorsFormat =
+          loadClass(
+              setVersion(luceneBinaryQuantizedVectorsFormat, version),
+              setVersion(luceneBinaryQuantizedVectorsFormatFallback, version));
+      hnswBinaryQuantizedVectorsFormat =
+          loadClass(
+              setVersion(luceneHnswBinaryQuantizedVectorsFormat, version),
+              setVersion(luceneHnswBinaryQuantizedVectorsFormatFallback, version));
+      return;
+    }
+
     flatVectorsFormat =
         loadClass(
             setVersion(luceneFlatVectorsFormat, version),
@@ -132,18 +145,6 @@ public class LuceneProvider {
         loadClass(
             setVersion(luceneHnswScalarQuantizedVectorsFormat, version),
             setVersion(luceneHnswScalarQuantizedVectorsFormatFallback, version));
-
-    // TODO: Find a better way if possible, but as a separate initiative.
-    if ("102".equals(version)) {
-      binaryQuantizedVectorsFormat =
-          loadClass(
-              setVersion(luceneBinaryQuantizedVectorsFormat, version),
-              setVersion(luceneBinaryQuantizedVectorsFormatFallback, version));
-      hnswBinaryQuantizedVectorsFormat =
-          loadClass(
-              setVersion(luceneHnswBinaryQuantizedVectorsFormat, version),
-              setVersion(luceneHnswBinaryQuantizedVectorsFormatFallback, version));
-    }
   }
 
   private static String setVersion(String pkg, String version) {
@@ -278,7 +279,7 @@ public class LuceneProvider {
     }
   }
 
-  public FlatVectorsFormat getluceneBinaryQuantizedVectorsFormatInstance() throws Exception {
+  public FlatVectorsFormat getLuceneBinaryQuantizedVectorsFormatInstance() throws Exception {
     try {
       Constructor<?> luceneBinaryQuantizedVectorsFormatConstructor =
           binaryQuantizedVectorsFormat.getConstructor();
@@ -291,12 +292,12 @@ public class LuceneProvider {
     }
   }
 
-  public FlatVectorsFormat getLuceneHnswBinaryQuantizedVectorsFormatInstance(
+  public KnnVectorsFormat getLuceneHnswBinaryQuantizedVectorsFormatInstance(
       int maxConn, int beamWidth) throws Exception {
     try {
       Constructor<?> luceneHnswBinaryQuantizedVectorsFormatConstructor =
           hnswBinaryQuantizedVectorsFormat.getConstructor(Integer.TYPE, Integer.TYPE);
-      return (FlatVectorsFormat)
+      return (KnnVectorsFormat)
           luceneHnswBinaryQuantizedVectorsFormatConstructor.newInstance(maxConn, beamWidth);
     } catch (Exception e) {
       log.log(

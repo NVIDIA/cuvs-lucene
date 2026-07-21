@@ -13,7 +13,6 @@ import java.util.logging.Logger;
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.KnnVectorsWriter;
-import org.apache.lucene.codecs.hnsw.DefaultFlatVectorScorer;
 import org.apache.lucene.codecs.hnsw.FlatVectorsFormat;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
@@ -50,9 +49,7 @@ public class LuceneAcceleratedHNSWBinaryQuantizedVectorsFormat extends KnnVector
         current = flatVectorsFormat;
         if (current == null) {
           try {
-            current =
-                luceneProvider("102")
-                    .getLuceneFlatVectorsFormatInstance(DefaultFlatVectorScorer.INSTANCE);
+            current = luceneProvider("102").getLuceneBinaryQuantizedVectorsFormatInstance();
             flatVectorsFormat = current;
           } catch (Exception e) {
             throw new UnsupportedOperationException(

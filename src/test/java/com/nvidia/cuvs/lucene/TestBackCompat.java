@@ -48,9 +48,11 @@ public class TestBackCompat {
     assertSame(provider99, LuceneProvider.getInstance("99"));
   }
 
-  @Test(expected = ClassNotFoundException.class)
-  public void testProviderDoesNotPretendLucene102IsACompleteProviderVersion() throws Exception {
-    LuceneProvider.getInstance("102");
+  @Test
+  public void testProviderSupportsLucene102BinaryFormats() throws Exception {
+    LuceneProvider provider102 = LuceneProvider.getInstance("102");
+    assertNotNull(provider102.getLuceneBinaryQuantizedVectorsFormatInstance());
+    assertNotNull(provider102.getLuceneHnswBinaryQuantizedVectorsFormatInstance(16, 100));
   }
 
   @Test
