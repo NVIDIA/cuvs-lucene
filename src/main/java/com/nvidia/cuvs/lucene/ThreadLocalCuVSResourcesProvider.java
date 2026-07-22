@@ -49,7 +49,11 @@ public class ThreadLocalCuVSResourcesProvider {
       CuVSResources resources = CuVSResources.create();
       String poolSizeProp = System.getProperty(WORKSPACE_POOL_SIZE_PROPERTY);
       if (poolSizeProp != null) {
-        resources.setWorkspacePool(Long.parseLong(poolSizeProp));
+        long poolBytes = Long.parseLong(poolSizeProp);
+        if (poolBytes > 0) {
+          // RMM's pool_memory_resource requires the initial size to be a multiple of 256 bytes.
+          resources.setWorkspacePool((poolBytes + 255L) & ~255L);
+        }
       }
       return resources;
     } catch (UnsupportedOperationException uoe) {
