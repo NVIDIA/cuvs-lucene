@@ -58,6 +58,13 @@ final class FilterBitsetCache {
   static final String PROP_ENABLED = "cuvs.lucene.filterBitsetCache.enabled";
   static final String PROP_MAX_BYTES = "cuvs.lucene.filterBitsetCache.maxBytes";
 
+  /**
+   * cuVS property (read by cuvs-java's filter resources) sizing the pre-warmed RMM pool that backs
+   * filter bitset device allocations. Defaulted to the resolved cache byte budget so the device pool
+   * tracks the cache; an operator can set it explicitly to override.
+   */
+  static final String PROP_FILTER_POOL_BYTES = "com.nvidia.cuvs.filterBitsetPoolSize";
+
   /** Upper bound on the lazily-derived default budget. */
   static final long CEILING_BYTES = 512L * 1024 * 1024;
 
@@ -159,6 +166,7 @@ final class FilterBitsetCache {
     if (workingSetBytes <= 0) return;
     if (!explicitBudget && maxBytes <= 0) {
       maxBytes = Math.min(DEFAULT_BUDGET_MULTIPLIER * workingSetBytes, CEILING_BYTES);
+      publishFilterPoolSize();
       return;
     }
     if (explicitBudget && !minSizeChecked) {
@@ -182,6 +190,19 @@ final class FilterBitsetCache {
               + " is smaller than the current working set "
               + workingSetBytes
               + " bytes; entries will be evicted or skipped, reducing cache effectiveness");
+    }
+    publishFilterPoolSize();
+  }
+
+  /**
+   * Defaults the cuVS filter device pool size ({@link #PROP_FILTER_POOL_BYTES}) to the resolved
+   * cache budget, so cuvs-java pre-warms a growable RMM pool sized to the cache. Set once, before
+   * the first bitset upload, and only when the operator has not set the property explicitly.
+   */
+  private static void publishFilterPoolSize() {
+    if (maxBytes <= 0) return;
+    if (System.getProperty(PROP_FILTER_POOL_BYTES) == null) {
+      System.setProperty(PROP_FILTER_POOL_BYTES, Long.toString(maxBytes));
     }
   }
 

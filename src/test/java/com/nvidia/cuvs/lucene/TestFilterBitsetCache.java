@@ -54,6 +54,27 @@ public class TestFilterBitsetCache {
     FilterBitsetCache.setMaxBytes(0); // back to lazy-default derivation
   }
 
+  /** The device pool property defaults to the resolved budget and never overrides an explicit one. */
+  @Test
+  public void filterPoolSizeDefaultsToBudget() {
+    String prop = FilterBitsetCache.PROP_FILTER_POOL_BYTES;
+    String saved = System.getProperty(prop);
+    System.clearProperty(prop);
+    try {
+      FilterBitsetCache.setMaxBytes(0); // lazy: budget derived from the first working set
+      FilterBitsetCache.onSearchWorkingSet(1_000);
+      long expected = FilterBitsetCache.DEFAULT_BUDGET_MULTIPLIER * 1_000; // below the ceiling
+      assertEquals(Long.toString(expected), System.getProperty(prop));
+
+      // A later, larger working set must not overwrite the already-published pool size.
+      FilterBitsetCache.onSearchWorkingSet(4_000);
+      assertEquals(Long.toString(expected), System.getProperty(prop));
+    } finally {
+      if (saved == null) System.clearProperty(prop);
+      else System.setProperty(prop, saved);
+    }
+  }
+
   /**
    * Fake handle faithfully modeling the {@link FilterBitsetHandle} reference-counting contract, so
    * the cache's use of it can be observed. {@link #decRef()} throws if released more times than
