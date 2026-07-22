@@ -70,8 +70,8 @@ public class TestFilterBitsetCache {
     }
   }
 
-  private static List<Object> keys(String s) {
-    return List.of(s);
+  private static Object segKey(String s) {
+    return s;
   }
 
   /** Concurrent misses on the same key build the handle exactly once and each get their own ref. */
@@ -93,7 +93,7 @@ public class TestFilterBitsetCache {
                   start.await();
                   return FilterBitsetCache.acquire(
                       null,
-                      keys(field),
+                      segKey(field),
                       field,
                       () -> {
                         buildCount.incrementAndGet();
@@ -141,7 +141,7 @@ public class TestFilterBitsetCache {
       CountingHandle h = new CountingHandle();
       handles.add(h);
       final String field = "evict-" + i;
-      FilterBitsetHandle got = FilterBitsetCache.acquire(null, keys(field), field, () -> h);
+      FilterBitsetHandle got = FilterBitsetCache.acquire(null, segKey(field), field, () -> h);
       assertSame(h, got);
       got.decRef(); // caller finished; the cache keeps its reference
     }
@@ -167,7 +167,7 @@ public class TestFilterBitsetCache {
     try {
       FilterBitsetCache.acquire(
           null,
-          keys(field),
+          segKey(field),
           field,
           () -> {
             buildCount.incrementAndGet();
@@ -183,7 +183,7 @@ public class TestFilterBitsetCache {
     FilterBitsetHandle got =
         FilterBitsetCache.acquire(
             null,
-            keys(field),
+            segKey(field),
             field,
             () -> {
               buildCount.incrementAndGet();
@@ -218,7 +218,7 @@ public class TestFilterBitsetCache {
                     final String field = "stress-" + ((seed + i) % keySpace);
                     // A fresh handle per build; a cached key reuses whatever was built first.
                     FilterBitsetHandle h =
-                        FilterBitsetCache.acquire(null, keys(field), field, CountingHandle::new);
+                        FilterBitsetCache.acquire(null, segKey(field), field, CountingHandle::new);
                     h.decRef();
                   }
                   return null;

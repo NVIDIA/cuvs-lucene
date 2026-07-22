@@ -55,10 +55,10 @@ import org.apache.lucene.util.FixedBitSet;
  * SINGLE_CTA's per-partition cap.
  *
  * <p>If the query has an explicit {@code filter}, or if any segment carries live-document deletes,
- * the combined acceptance mask (filter ∩ liveDocs) is packed across all segments into a single
- * {@link FilterBitsetHandle}. The host-side packed arrays are cached per unique
- * (filter, reader-state, field) triple via {@link FilterBitsetCache}; the device upload is cached
- * inside the handle itself across threads.
+ * the acceptance mask (filter ∩ liveDocs) is packed into one {@link FilterBitsetHandle} per segment
+ * and passed as that partition's filter. The host-side packed arrays are cached per unique
+ * (filter, single-segment reader key, field) triple via {@link FilterBitsetCache}; the device
+ * upload is cached inside the handle itself across threads.
  *
  * <p>Falls back to the standard per-segment Lucene path when the optimized path cannot be
  * applied: mixed segment types, a missing CAGRA index for the field on any segment, or segments
@@ -159,10 +159,10 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
       gpuReaders.add(gpuReader);
     }
 
-    // Build a single filter handle encoding (filter ∩ liveDocs) across every segment whenever
-    // any filtering is required — either an explicit Lucene filter, or live-document deletes in
-    // at least one segment. With the single-query multi-partition API, there is no other channel
-    // for per-segment liveDocs, so they must be folded into the FilterBitsetHandle.
+    // Build one filter handle per segment encoding (filter ∩ that segment's liveDocs) whenever any
+    // filtering is required — either an explicit Lucene filter, or live-document deletes in at least
+    // one segment. Each segment's handle becomes that partition's filter; a segment with neither an
+    // explicit filter nor deletes gets a null entry (unfiltered for that partition).
     boolean hasExplicitFilter = (filter != null);
     boolean hasDeletes = false;
     for (LeafReaderContext ctx : leaves) {
@@ -175,10 +175,10 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
     CuVSResources resources = getCuVSResourcesInstance();
     List<CagraIndex> cagraIndices = new ArrayList<>(leaves.size());
 
-    FilterBitsetHandle filterHandle = null;
+    List<FilterBitsetHandle> filterHandles = null;
     try {
       if (hasExplicitFilter || hasDeletes) {
-        filterHandle = buildOrGetCachedFilterHandle(indexSearcher, leaves, gpuReaders);
+        filterHandles = buildPerSegmentFilterHandles(indexSearcher, leaves, gpuReaders);
       }
 
       float[] target = getTargetCopy();
@@ -211,7 +211,7 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
                 .build();
 
         MultiPartitionSearchResults results =
-            MultiPartitionCagraSearch.search(resources, cagraIndices, cagraQuery, k, filterHandle);
+            MultiPartitionCagraSearch.search(resources, cagraIndices, cagraQuery, k, filterHandles);
 
         if (results.count() == 0) {
           return new MatchNoDocsQuery();
@@ -247,9 +247,14 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
       Utils.handleThrowable(t);
       throw new AssertionError("handleThrowable always throws"); // unreachable
     } finally {
-      // Release this query's reference. A cached handle is kept alive by the cache's own reference
-      // until eviction; an uncacheable handle holds only this reference and is freed here.
-      if (filterHandle != null) filterHandle.decRef();
+      // Release this query's reference on each per-segment handle. A cached handle is kept alive by
+      // the cache's own reference until eviction; an uncacheable handle holds only this reference
+      // and is freed here.
+      if (filterHandles != null) {
+        for (FilterBitsetHandle handle : filterHandles) {
+          if (handle != null) handle.decRef();
+        }
+      }
     }
   }
 
@@ -276,45 +281,19 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
   // -------------------------------------------------------------------------
 
   /**
-   * Returns a {@link FilterBitsetHandle} encoding ({@link #filter} ∩ liveDocs) for every segment,
-   * pulling from {@link FilterBitsetCache} when the reader state is unchanged.
+   * Returns one {@link FilterBitsetHandle} per segment (in {@code leaves} order) encoding ({@link
+   * #filter} ∩ that segment's liveDocs), pulling each from {@link FilterBitsetCache} when the
+   * reader state is unchanged. A segment with neither an explicit filter nor deletes gets a {@code
+   * null} entry (unfiltered for that partition).
    *
-   * <p>Cache key uses per-reader keys (not just core keys) so that liveDocs changes — which happen
-   * when a reader is reopened after deletes — automatically invalidate the cached bitset.
+   * <p>The cache key uses the single segment's per-reader key (not just the core key), so liveDocs
+   * changes — which happen when a reader is reopened after deletes — invalidate that segment's
+   * cached bitset, and an index update only affects the changed segments' entries.
    *
-   * <p>The returned handle carries a reference the caller must release with {@link
+   * <p>Each non-null handle carries a reference the caller must release with {@link
    * FilterBitsetHandle#decRef()} once the search completes.
    */
-  private FilterBitsetHandle buildOrGetCachedFilterHandle(
-      IndexSearcher indexSearcher,
-      List<LeafReaderContext> leaves,
-      List<CuVS2510GPUVectorsReader> gpuReaders)
-      throws IOException {
-
-    List<Object> segReaderKeys = new ArrayList<>(leaves.size());
-    for (LeafReaderContext ctx : leaves) {
-      var helper = ctx.reader().getReaderCacheHelper();
-      if (helper == null) {
-        // This reader can't be cached; build an uncached handle owned outright by the caller.
-        return buildFilterHandle(indexSearcher, leaves, gpuReaders);
-      }
-      segReaderKeys.add(helper.getKey());
-    }
-
-    return FilterBitsetCache.acquire(
-        filter,
-        segReaderKeys,
-        field,
-        () -> buildFilterHandle(indexSearcher, leaves, gpuReaders));
-  }
-
-  /**
-   * Evaluates {@link #filter} per segment (when set), intersects with liveDocs, and packs the
-   * result into a new {@link FilterBitsetHandle}. When {@link #filter} is {@code null}, the
-   * handle encodes liveDocs alone — this path is taken when one or more segments have deletes
-   * but no explicit Lucene filter was supplied.
-   */
-  private FilterBitsetHandle buildFilterHandle(
+  private List<FilterBitsetHandle> buildPerSegmentFilterHandles(
       IndexSearcher indexSearcher,
       List<LeafReaderContext> leaves,
       List<CuVS2510GPUVectorsReader> gpuReaders)
@@ -326,34 +305,52 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
           indexSearcher.createWeight(
               indexSearcher.rewrite(filter), ScoreMode.COMPLETE_NO_SCORES, 1.0f);
     }
+    final Weight sharedFilterWeight = filterWeight;
 
-    int numSegments = leaves.size();
-    long[] segBitOffsets = new long[numSegments];
-    long totalBits = 0;
-    for (int i = 0; i < numSegments; i++) {
-      segBitOffsets[i] = totalBits;
-      int numOrds = gpuReaders.get(i).getFloatVectorValues(field).size();
-      totalBits += (((long) numOrds + 63) / 64) * 64;
-    }
-    long[] combinedLongs = new long[(int) (totalBits / 64)];
-
-    for (int i = 0; i < numSegments; i++) {
+    List<FilterBitsetHandle> handles = new ArrayList<>(leaves.size());
+    for (int i = 0; i < leaves.size(); i++) {
       LeafReaderContext ctx = leaves.get(i);
-      Bits liveDocs = ctx.reader().getLiveDocs();
-      // When filterWeight is null, accept all live documents (acceptDocs == liveDocs, which may
-      // itself be null to mean "all docs accepted" in this segment).
-      Bits acceptDocs = (filterWeight != null) ? evalFilter(filterWeight, ctx, liveDocs) : liveDocs;
-      FloatVectorValues fvv = gpuReaders.get(i).getFloatVectorValues(field);
-      Bits acceptedOrds = fvv.getAcceptOrds(acceptDocs);
-      int numOrds = fvv.size();
-      int longOffset = (int) (segBitOffsets[i] / 64);
-      packOrdsToLongs(acceptedOrds, numOrds, combinedLongs, longOffset);
+      CuVS2510GPUVectorsReader gpuReader = gpuReaders.get(i);
+      // No explicit filter and no deletes in this segment: no filter for this partition.
+      if (filter == null && ctx.reader().getLiveDocs() == null) {
+        handles.add(null);
+        continue;
+      }
+      var helper = ctx.reader().getReaderCacheHelper();
+      if (helper == null) {
+        // This reader can't be cached; build an uncached handle owned outright by the caller.
+        handles.add(buildSegmentFilterHandle(sharedFilterWeight, ctx, gpuReader));
+      } else {
+        handles.add(
+            FilterBitsetCache.acquire(
+                filter,
+                helper.getKey(),
+                field,
+                () -> buildSegmentFilterHandle(sharedFilterWeight, ctx, gpuReader)));
+      }
     }
+    return handles;
+  }
 
-    // Only the combined bitset is transported; cuVS recomputes the per-partition bit offsets from
-    // the index sizes. segBitOffsets is used above solely to pack each segment's slice (64-bit
-    // word-aligned), matching that recomputation.
-    return FilterBitsetHandle.create(combinedLongs);
+  /**
+   * Evaluates {@code filterWeight} (when non-null) in {@code ctx}, intersects with liveDocs, and
+   * packs the accepted ordinals of this one segment into a new {@link FilterBitsetHandle}. When
+   * {@code filterWeight} is {@code null}, the handle encodes liveDocs alone — the path taken for a
+   * segment with deletes but no explicit Lucene filter.
+   */
+  private FilterBitsetHandle buildSegmentFilterHandle(
+      Weight filterWeight, LeafReaderContext ctx, CuVS2510GPUVectorsReader gpuReader)
+      throws IOException {
+    Bits liveDocs = ctx.reader().getLiveDocs();
+    // When filterWeight is null, accept all live documents (acceptDocs == liveDocs, which may itself
+    // be null to mean "all docs accepted" in this segment).
+    Bits acceptDocs = (filterWeight != null) ? evalFilter(filterWeight, ctx, liveDocs) : liveDocs;
+    FloatVectorValues fvv = gpuReader.getFloatVectorValues(field);
+    Bits acceptedOrds = fvv.getAcceptOrds(acceptDocs);
+    int numOrds = fvv.size();
+    long[] segLongs = new long[(int) (((long) numOrds + 63) / 64)];
+    packOrdsToLongs(acceptedOrds, numOrds, segLongs, 0);
+    return FilterBitsetHandle.create(segLongs);
   }
 
   /**

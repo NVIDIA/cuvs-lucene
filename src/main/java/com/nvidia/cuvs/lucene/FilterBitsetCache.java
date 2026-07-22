@@ -7,7 +7,6 @@ package com.nvidia.cuvs.lucene;
 import com.nvidia.cuvs.FilterBitsetHandle;
 import java.io.IOException;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -15,8 +14,9 @@ import java.util.concurrent.CompletionException;
 import org.apache.lucene.search.Query;
 
 /**
- * Shared LRU cache mapping (filter Query, per-segment reader keys, field) → {@link
- * FilterBitsetHandle}.
+ * Shared LRU cache mapping (filter Query, single-segment reader key, field) → {@link
+ * FilterBitsetHandle}. One entry per segment, so an index update only invalidates the changed
+ * segments' entries rather than the whole cache.
  *
  * <p>Host-side cache holding packed bitset arrays; the device-side upload is managed inside {@link
  * FilterBitsetHandle} itself. Entries are evicted in LRU order.
@@ -45,18 +45,18 @@ final class FilterBitsetCache {
     FilterBitsetHandle build() throws IOException;
   }
 
-  private record FilterCacheKey(Query filter, List<Object> segReaderKeys, String field) {
+  private record FilterCacheKey(Query filter, Object segReaderKey, String field) {
     @Override
     public boolean equals(Object o) {
       if (!(o instanceof FilterCacheKey other)) return false;
       return Objects.equals(filter, other.filter)
-          && Objects.equals(segReaderKeys, other.segReaderKeys)
+          && Objects.equals(segReaderKey, other.segReaderKey)
           && Objects.equals(field, other.field);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(filter, segReaderKeys, field);
+      return Objects.hash(filter, segReaderKey, field);
     }
   }
 
@@ -81,9 +81,8 @@ final class FilterBitsetCache {
    * FilterBitsetHandle#decRef()} once the search completes.
    */
   static FilterBitsetHandle acquire(
-      Query filter, List<Object> segReaderKeys, String field, FilterBuilder builder)
-      throws IOException {
-    FilterCacheKey key = new FilterCacheKey(filter, segReaderKeys, field);
+      Query filter, Object segReaderKey, String field, FilterBuilder builder) throws IOException {
+    FilterCacheKey key = new FilterCacheKey(filter, segReaderKey, field);
     while (true) {
       CompletableFuture<FilterBitsetHandle> future;
       boolean owner = false;
