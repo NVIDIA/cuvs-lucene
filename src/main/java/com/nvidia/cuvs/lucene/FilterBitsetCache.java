@@ -6,11 +6,16 @@ package com.nvidia.cuvs.lucene;
 
 import com.nvidia.cuvs.FilterBitsetHandle;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.Query;
 
 /**
@@ -73,6 +78,9 @@ final class FilterBitsetCache {
         }
       };
 
+  // Segment reader keys with a registered close listener, so each reader registers exactly once.
+  private static final Set<Object> REGISTERED = new HashSet<>();
+
   private FilterBitsetCache() {}
 
   /**
@@ -127,6 +135,40 @@ final class FilterBitsetCache {
       }
       // Rare: the entry was evicted and its cache reference released between completion and our
       // acquisition. It is already gone from the map, so retry and rebuild.
+    }
+  }
+
+  /**
+   * Registers a one-time close listener on {@code helper} so every cache entry for this segment
+   * reader is evicted (and its device allocation released) as soon as the reader's core closes —
+   * e.g. when the segment is merged away or the reader is reopened with new deletes. This ties the
+   * cache to the segment lifecycle (mirroring Lucene's own query cache) so obsolete entries do not
+   * linger until LRU eviction.
+   */
+  static void ensureCloseListener(IndexReader.CacheHelper helper) {
+    Object segReaderKey = helper.getKey();
+    synchronized (FilterBitsetCache.class) {
+      if (!REGISTERED.add(segReaderKey)) return; // a listener is already registered for this reader
+    }
+    helper.addClosedListener(FilterBitsetCache::invalidateReader);
+  }
+
+  /** Evicts and releases every cache entry belonging to the given segment reader key. */
+  static void invalidateReader(Object segReaderKey) {
+    List<CompletableFuture<FilterBitsetHandle>> toRelease = new ArrayList<>();
+    synchronized (FilterBitsetCache.class) {
+      REGISTERED.remove(segReaderKey);
+      var it = CACHE.entrySet().iterator();
+      while (it.hasNext()) {
+        Map.Entry<FilterCacheKey, CompletableFuture<FilterBitsetHandle>> e = it.next();
+        if (Objects.equals(e.getKey().segReaderKey(), segReaderKey)) {
+          toRelease.add(e.getValue());
+          it.remove();
+        }
+      }
+    }
+    for (CompletableFuture<FilterBitsetHandle> future : toRelease) {
+      releaseCacheRef(future);
     }
   }
 

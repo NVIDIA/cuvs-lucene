@@ -158,6 +158,48 @@ public class TestFilterBitsetCache {
     }
   }
 
+  /** invalidateReader evicts and frees exactly the given segment's entries, leaving others cached. */
+  @Test
+  public void invalidateReaderEvictsOnlyThatSegment() throws Exception {
+    CountingHandle hA = new CountingHandle();
+    CountingHandle hB = new CountingHandle();
+    Object keyA = segKey("segA");
+    Object keyB = segKey("segB");
+    AtomicInteger buildA = new AtomicInteger();
+
+    // Cache one entry per segment, releasing the caller ref so the cache keeps its own.
+    FilterBitsetCache.acquire(
+            null,
+            keyA,
+            "f",
+            () -> {
+              buildA.incrementAndGet();
+              return hA;
+            })
+        .decRef();
+    FilterBitsetCache.acquire(null, keyB, "f", () -> hB).decRef();
+
+    // Invalidate segment A only, as its reader's close listener would.
+    FilterBitsetCache.invalidateReader(keyA);
+
+    assertTrue("segment A handle freed on invalidation", hA.freed.get());
+    assertEquals("segment A handle closed exactly once", 1, hA.closeCalls.get());
+    assertFalse("segment B handle must remain cached", hB.freed.get());
+    assertEquals("segment B handle must not be closed", 0, hB.closeCalls.get());
+
+    // Segment A's entry is gone, so a later acquire rebuilds it.
+    FilterBitsetCache.acquire(
+            null,
+            keyA,
+            "f",
+            () -> {
+              buildA.incrementAndGet();
+              return new CountingHandle();
+            })
+        .decRef();
+    assertEquals("invalidated segment rebuilds on next acquire", 2, buildA.get());
+  }
+
   /** A failed build is not cached, so a later acquire rebuilds. */
   @Test
   public void failedBuildIsNotCachedAndCanRetry() throws Exception {

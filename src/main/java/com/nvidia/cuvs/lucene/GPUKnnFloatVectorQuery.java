@@ -321,6 +321,8 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
         // This reader can't be cached; build an uncached handle owned outright by the caller.
         handles.add(buildSegmentFilterHandle(sharedFilterWeight, ctx, gpuReader));
       } else {
+        // Evict this segment's cache entries when its reader closes (merge/reopen), not just on LRU.
+        FilterBitsetCache.ensureCloseListener(helper);
         handles.add(
             FilterBitsetCache.acquire(
                 filter,
