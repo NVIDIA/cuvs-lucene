@@ -47,7 +47,7 @@ import org.junit.Test;
 /**
  * End-to-end concurrency test for the filter-bitset path of multi-segment GPU search. Many threads
  * issue filtered {@link GPUKnnFloatVectorQuery} searches across a rotating set of distinct filters
- * (more than {@link FilterBitsetCache#MAX_HOST_ENTRIES}) so the shared filter cache continuously
+ * (more than the cache's default budget spans) so the shared filter cache continuously
  * builds, caches, evicts, and reuses handles under contention. Every returned hit must satisfy its
  * filter, which validates that the reference-counted eviction never frees a handle still in use.
  */
@@ -60,8 +60,9 @@ public class TestMultiSegmentGPUFilterConcurrency extends LuceneTestCase {
   private static Codec codec;
   private static final String VECTOR_FIELD = "vectors";
   private static final String CATEGORY_FIELD = "cat";
-  // More categories than MAX_HOST_ENTRIES so distinct-filter churn forces cache eviction.
-  private static final int NUM_CATEGORIES = FilterBitsetCache.MAX_HOST_ENTRIES + 8;
+  // More distinct filters than the default budget spans (16x one query's working set), so their
+  // churn forces byte-cap cache eviction.
+  private static final int NUM_CATEGORIES = (int) FilterBitsetCache.DEFAULT_BUDGET_MULTIPLIER + 8;
 
   private static Directory directory;
   private static DirectoryReader reader;
@@ -74,6 +75,10 @@ public class TestMultiSegmentGPUFilterConcurrency extends LuceneTestCase {
   @BeforeClass
   public static void beforeClass() throws Exception {
     assumeTrue("cuVS not supported", isSupported());
+    // Start from a clean, lazily-derived budget so churn is driven only by this test's filters.
+    FilterBitsetCache.clear();
+    FilterBitsetCache.setEnabled(true);
+    FilterBitsetCache.setMaxBytes(0);
     codec = new CuVS2510GPUSearchCodec();
 
     int datasetSize = 2000;
@@ -184,6 +189,8 @@ public class TestMultiSegmentGPUFilterConcurrency extends LuceneTestCase {
   public static void afterClass() throws IOException {
     if (reader != null) reader.close();
     if (directory != null) directory.close();
+    FilterBitsetCache.clear();
+    FilterBitsetCache.setMaxBytes(0);
     reader = null;
     directory = null;
     searcher = null;

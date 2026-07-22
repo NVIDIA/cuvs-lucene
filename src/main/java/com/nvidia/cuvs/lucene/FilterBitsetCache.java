@@ -15,6 +15,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.logging.Logger;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.Query;
 
@@ -24,7 +25,17 @@ import org.apache.lucene.search.Query;
  * segments' entries rather than the whole cache.
  *
  * <p>Host-side cache holding packed bitset arrays; the device-side upload is managed inside {@link
- * FilterBitsetHandle} itself. Entries are evicted in LRU order.
+ * FilterBitsetHandle} itself. Entries are evicted in LRU order once the total cached size exceeds
+ * the configured byte budget.
+ *
+ * <h2>Sizing</h2>
+ *
+ * <p>The cache is bounded by a byte budget rather than an entry count, since per-segment bitsets
+ * vary widely in size. The budget covers the host-side packed arrays; the device-side allocation
+ * mirrors it one-for-one, so a single budget bounds both. By default the budget is derived lazily
+ * from the first search's working set (16× the bytes needed to hold one bit per vector across the
+ * searched segments, capped at {@link #CEILING_BYTES}); it can also be set explicitly via {@link
+ * #setMaxBytes} or the {@code cuvs.lucene.filterBitsetCache.maxBytes} system property.
  *
  * <h2>Concurrency</h2>
  *
@@ -42,7 +53,22 @@ import org.apache.lucene.search.Query;
  */
 final class FilterBitsetCache {
 
-  static final int MAX_HOST_ENTRIES = 16;
+  private static final Logger LOG = Logger.getLogger(FilterBitsetCache.class.getName());
+
+  static final String PROP_ENABLED = "cuvs.lucene.filterBitsetCache.enabled";
+  static final String PROP_MAX_BYTES = "cuvs.lucene.filterBitsetCache.maxBytes";
+
+  /** Upper bound on the lazily-derived default budget. */
+  static final long CEILING_BYTES = 512L * 1024 * 1024;
+
+  /** Multiplier applied to the first search's working set when deriving the default budget. */
+  static final long DEFAULT_BUDGET_MULTIPLIER = 16;
+
+  /**
+   * Secondary guard on entry count so a pathological stream of tiny entries cannot grow the map
+   * unbounded even when the byte budget is generous. The byte budget is the primary bound.
+   */
+  static final int MAX_ENTRIES_GUARD = 4096;
 
   /** Builds the handle for a key on a cache miss. */
   @FunctionalInterface
@@ -65,41 +91,150 @@ final class FilterBitsetCache {
     }
   }
 
-  private static final LinkedHashMap<FilterCacheKey, CompletableFuture<FilterBitsetHandle>> CACHE =
-      new LinkedHashMap<>(MAX_HOST_ENTRIES + 2, 0.75f, /* access-order= */ true) {
-        @Override
-        protected boolean removeEldestEntry(
-            Map.Entry<FilterCacheKey, CompletableFuture<FilterBitsetHandle>> eldest) {
-          if (size() > MAX_HOST_ENTRIES) {
-            releaseCacheRef(eldest.getValue());
-            return true;
-          }
-          return false;
-        }
-      };
+  /** A cached future together with the byte size charged to the budget for its entry. */
+  private record CacheEntry(CompletableFuture<FilterBitsetHandle> future, long bytes) {}
+
+  private static final LinkedHashMap<FilterCacheKey, CacheEntry> CACHE =
+      new LinkedHashMap<>(16, 0.75f, /* access-order= */ true);
 
   // Segment reader keys with a registered close listener, so each reader registers exactly once.
   private static final Set<Object> REGISTERED = new HashSet<>();
 
+  // ---- Configuration (guarded by FilterBitsetCache.class) ----
+
+  private static boolean enabled =
+      Boolean.parseBoolean(System.getProperty(PROP_ENABLED, "true"));
+
+  /** Byte budget; {@code <= 0} means "derive lazily from the first search's working set". */
+  private static long maxBytes = Long.parseLong(System.getProperty(PROP_MAX_BYTES, "0"));
+
+  /** Whether {@link #maxBytes} was configured explicitly (vs. left to lazy derivation). */
+  private static boolean explicitBudget = maxBytes > 0;
+
+  /** Whether the one-time hard min-size check against an explicit budget has run. */
+  private static boolean minSizeChecked;
+
+  private static boolean growthWarned;
+  private static boolean oversizedWarned;
+
+  /** Total bytes charged to the budget across all live cache entries. */
+  private static long totalBytes;
+
   private FilterBitsetCache() {}
+
+  /** Whether caching is enabled. When disabled, callers build uncached, caller-owned handles. */
+  static synchronized boolean isEnabled() {
+    return enabled;
+  }
+
+  /** Enables or disables caching. Disabling does not evict existing entries; call {@link #clear}. */
+  static synchronized void setEnabled(boolean value) {
+    enabled = value;
+  }
+
+  /**
+   * Sets the byte budget. A positive value is honored as an explicit budget; a non-positive value
+   * restores lazy derivation from the next search's working set.
+   */
+  static synchronized void setMaxBytes(long bytes) {
+    maxBytes = bytes;
+    explicitBudget = bytes > 0;
+    minSizeChecked = false;
+    growthWarned = false;
+    oversizedWarned = false;
+  }
+
+  /**
+   * Informs the cache of the total byte working set of the search about to run — the sum, over the
+   * segments needing a filter, of the bytes to hold one bit per vector. Called once per search
+   * before any {@link #acquire}.
+   *
+   * <p>On the first informative call this resolves a lazily-derived budget. When the budget was set
+   * explicitly and is smaller than even this minimum working set, it fails loudly once (the caller
+   * should raise the budget or disable the cache). Later index growth that pushes the working set
+   * past the budget does not fail — the byte-cap eviction and the oversized-entry skip absorb it,
+   * with a one-time warning.
+   */
+  static synchronized void onSearchWorkingSet(long workingSetBytes) {
+    if (workingSetBytes <= 0) return;
+    if (!explicitBudget && maxBytes <= 0) {
+      maxBytes = Math.min(DEFAULT_BUDGET_MULTIPLIER * workingSetBytes, CEILING_BYTES);
+      return;
+    }
+    if (explicitBudget && !minSizeChecked) {
+      minSizeChecked = true;
+      if (maxBytes < workingSetBytes) {
+        throw new IllegalStateException(
+            "filter bitset cache maxBytes="
+                + maxBytes
+                + " is smaller than the minimum working set "
+                + workingSetBytes
+                + " bytes for this query; raise "
+                + PROP_MAX_BYTES
+                + " or disable the cache");
+      }
+    }
+    if (maxBytes < workingSetBytes && !growthWarned) {
+      growthWarned = true;
+      LOG.warning(
+          "filter bitset cache maxBytes="
+              + maxBytes
+              + " is smaller than the current working set "
+              + workingSetBytes
+              + " bytes; entries will be evicted or skipped, reducing cache effectiveness");
+    }
+  }
 
   /**
    * Returns the handle for the given key, building it once if absent. The returned handle has a
    * reference taken on the caller's behalf that must be released with {@link
    * FilterBitsetHandle#decRef()} once the search completes.
+   *
+   * @param entryBytes byte size charged to the budget for this entry (the packed bitset length)
    */
   static FilterBitsetHandle acquire(
-      Query filter, Object segReaderKey, String field, FilterBuilder builder) throws IOException {
+      Query filter, Object segReaderKey, String field, long entryBytes, FilterBuilder builder)
+      throws IOException {
+    // A single entry larger than the whole budget is never cached; hand back a caller-owned handle.
+    boolean oversized;
+    synchronized (FilterBitsetCache.class) {
+      oversized = maxBytes > 0 && entryBytes > maxBytes;
+      if (oversized && !oversizedWarned) {
+        oversizedWarned = true;
+        LOG.warning(
+            "filter bitset entry of "
+                + entryBytes
+                + " bytes exceeds the cache budget "
+                + maxBytes
+                + " bytes; serving it uncached");
+      }
+    }
+    if (oversized) {
+      return builder.build();
+    }
+
     FilterCacheKey key = new FilterCacheKey(filter, segReaderKey, field);
     while (true) {
       CompletableFuture<FilterBitsetHandle> future;
       boolean owner = false;
+      List<CompletableFuture<FilterBitsetHandle>> evicted = null;
       synchronized (FilterBitsetCache.class) {
-        future = CACHE.get(key);
-        if (future == null) {
+        CacheEntry entry = CACHE.get(key);
+        if (entry == null) {
           future = new CompletableFuture<>();
-          CACHE.put(key, future);
+          CACHE.put(key, new CacheEntry(future, entryBytes));
+          totalBytes += entryBytes;
           owner = true;
+          evicted = new ArrayList<>();
+          evictToBudget(key, evicted);
+        } else {
+          future = entry.future();
+        }
+      }
+
+      if (evicted != null) {
+        for (CompletableFuture<FilterBitsetHandle> f : evicted) {
+          releaseCacheRef(f);
         }
       }
 
@@ -111,7 +246,11 @@ final class FilterBitsetCache {
           // Drop the failed entry so a later call rebuilds, then propagate to this thread and any
           // waiters (which observe the exception via join() and retry).
           synchronized (FilterBitsetCache.class) {
-            CACHE.remove(key, future);
+            CacheEntry cur = CACHE.get(key);
+            if (cur != null && cur.future() == future) {
+              CACHE.remove(key);
+              totalBytes -= cur.bytes();
+            }
           }
           future.completeExceptionally(t);
           if (t instanceof IOException io) throw io;
@@ -139,6 +278,26 @@ final class FilterBitsetCache {
   }
 
   /**
+   * Evicts eldest (least-recently-used) entries until the total size is within the byte budget and
+   * the entry count is within the guard, never evicting {@code keep} (the entry needed by the
+   * in-flight acquire). Runs under the cache lock; the evicted futures are collected into {@code
+   * out} so their cache references are released after the lock is dropped.
+   */
+  private static void evictToBudget(
+      FilterCacheKey keep, List<CompletableFuture<FilterBitsetHandle>> out) {
+    long budget = maxBytes > 0 ? maxBytes : Long.MAX_VALUE;
+    var it = CACHE.entrySet().iterator();
+    while ((totalBytes > budget || CACHE.size() > MAX_ENTRIES_GUARD) && it.hasNext()) {
+      Map.Entry<FilterCacheKey, CacheEntry> e = it.next();
+      if (e.getKey().equals(keep)) continue; // access-order puts `keep` last; never evict it
+      CacheEntry ce = e.getValue();
+      totalBytes -= ce.bytes();
+      out.add(ce.future());
+      it.remove();
+    }
+  }
+
+  /**
    * Registers a one-time close listener on {@code helper} so every cache entry for this segment
    * reader is evicted (and its device allocation released) as soon as the reader's core closes —
    * e.g. when the segment is merged away or the reader is reopened with new deletes. This ties the
@@ -160,9 +319,11 @@ final class FilterBitsetCache {
       REGISTERED.remove(segReaderKey);
       var it = CACHE.entrySet().iterator();
       while (it.hasNext()) {
-        Map.Entry<FilterCacheKey, CompletableFuture<FilterBitsetHandle>> e = it.next();
+        Map.Entry<FilterCacheKey, CacheEntry> e = it.next();
         if (Objects.equals(e.getKey().segReaderKey(), segReaderKey)) {
-          toRelease.add(e.getValue());
+          CacheEntry ce = e.getValue();
+          totalBytes -= ce.bytes();
+          toRelease.add(ce.future());
           it.remove();
         }
       }
@@ -170,6 +331,27 @@ final class FilterBitsetCache {
     for (CompletableFuture<FilterBitsetHandle> future : toRelease) {
       releaseCacheRef(future);
     }
+  }
+
+  /** Evicts and releases every cache entry, resetting the byte budget accounting. */
+  static void clear() {
+    List<CompletableFuture<FilterBitsetHandle>> toRelease = new ArrayList<>();
+    synchronized (FilterBitsetCache.class) {
+      for (CacheEntry ce : CACHE.values()) {
+        toRelease.add(ce.future());
+      }
+      CACHE.clear();
+      REGISTERED.clear();
+      totalBytes = 0;
+    }
+    for (CompletableFuture<FilterBitsetHandle> future : toRelease) {
+      releaseCacheRef(future);
+    }
+  }
+
+  /** Total bytes currently charged to the budget. Test hook. */
+  static synchronized long currentBytesForTests() {
+    return totalBytes;
   }
 
   /** Releases the cache's reference once the (possibly in-flight) build completes. */

@@ -307,19 +307,45 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
     }
     final Weight sharedFilterWeight = filterWeight;
 
-    List<FilterBitsetHandle> handles = new ArrayList<>(leaves.size());
-    for (int i = 0; i < leaves.size(); i++) {
+    final int n = leaves.size();
+    boolean[] needsFilter = new boolean[n];
+    FloatVectorValues[] fvvs = new FloatVectorValues[n];
+    long[] entryBytes = new long[n];
+    long workingSetBytes = 0;
+    for (int i = 0; i < n; i++) {
       LeafReaderContext ctx = leaves.get(i);
-      CuVS2510GPUVectorsReader gpuReader = gpuReaders.get(i);
       // No explicit filter and no deletes in this segment: no filter for this partition.
       if (filter == null && ctx.reader().getLiveDocs() == null) {
+        continue;
+      }
+      needsFilter[i] = true;
+      FloatVectorValues fvv = gpuReaders.get(i).getFloatVectorValues(field);
+      fvvs[i] = fvv;
+      // Bytes to hold one bit per vector, word-aligned: this segment's cache-entry size.
+      long segBytes = (((long) fvv.size() + 63) / 64) * 8;
+      entryBytes[i] = segBytes;
+      workingSetBytes += segBytes;
+    }
+
+    boolean cacheEnabled = FilterBitsetCache.isEnabled();
+    if (cacheEnabled) {
+      // Resolves the lazy default budget (and validates an explicit one) before any acquire.
+      FilterBitsetCache.onSearchWorkingSet(workingSetBytes);
+    }
+
+    List<FilterBitsetHandle> handles = new ArrayList<>(n);
+    for (int i = 0; i < n; i++) {
+      if (!needsFilter[i]) {
         handles.add(null);
         continue;
       }
-      var helper = ctx.reader().getReaderCacheHelper();
+      LeafReaderContext ctx = leaves.get(i);
+      FloatVectorValues fvv = fvvs[i];
+      // When caching is disabled, route every segment through the uncached, caller-owned path.
+      var helper = cacheEnabled ? ctx.reader().getReaderCacheHelper() : null;
       if (helper == null) {
         // This reader can't be cached; build an uncached handle owned outright by the caller.
-        handles.add(buildSegmentFilterHandle(sharedFilterWeight, ctx, gpuReader));
+        handles.add(buildSegmentFilterHandle(sharedFilterWeight, ctx, fvv));
       } else {
         // Evict this segment's cache entries when its reader closes (merge/reopen), not just on LRU.
         FilterBitsetCache.ensureCloseListener(helper);
@@ -328,7 +354,8 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
                 filter,
                 helper.getKey(),
                 field,
-                () -> buildSegmentFilterHandle(sharedFilterWeight, ctx, gpuReader)));
+                entryBytes[i],
+                () -> buildSegmentFilterHandle(sharedFilterWeight, ctx, fvv)));
       }
     }
     return handles;
@@ -341,13 +368,11 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
    * segment with deletes but no explicit Lucene filter.
    */
   private FilterBitsetHandle buildSegmentFilterHandle(
-      Weight filterWeight, LeafReaderContext ctx, CuVS2510GPUVectorsReader gpuReader)
-      throws IOException {
+      Weight filterWeight, LeafReaderContext ctx, FloatVectorValues fvv) throws IOException {
     Bits liveDocs = ctx.reader().getLiveDocs();
     // When filterWeight is null, accept all live documents (acceptDocs == liveDocs, which may itself
     // be null to mean "all docs accepted" in this segment).
     Bits acceptDocs = (filterWeight != null) ? evalFilter(filterWeight, ctx, liveDocs) : liveDocs;
-    FloatVectorValues fvv = gpuReader.getFloatVectorValues(field);
     Bits acceptedOrds = fvv.getAcceptOrds(acceptDocs);
     int numOrds = fvv.size();
     long[] segLongs = new long[(int) (((long) numOrds + 63) / 64)];
