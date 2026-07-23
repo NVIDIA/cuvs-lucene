@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -9,19 +9,23 @@ import com.nvidia.cuvs.CagraIndex;
 import com.nvidia.cuvs.CagraIndexParams;
 import com.nvidia.cuvs.CagraIndexParams.CuvsDistanceType;
 import com.nvidia.cuvs.CagraIndexParams.HnswHeuristicType;
+import com.nvidia.cuvs.CagraQuery;
 import com.nvidia.cuvs.CuVSDeviceMatrix;
 import com.nvidia.cuvs.CuVSHostMatrix;
 import com.nvidia.cuvs.CuVSMatrix;
 import com.nvidia.cuvs.CuVSMatrix.Builder;
 import com.nvidia.cuvs.CuVSMatrix.DataType;
 import com.nvidia.cuvs.CuVSResources;
+import com.nvidia.cuvs.FilterBitsetHandle;
 import com.nvidia.cuvs.GPUInfoProvider;
 import com.nvidia.cuvs.HnswIndex;
 import com.nvidia.cuvs.HnswIndexParams;
+import com.nvidia.cuvs.MultiPartitionSearchResults;
 import com.nvidia.cuvs.TieredIndex;
 import com.nvidia.cuvs.spi.CuVSProvider;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.logging.Level;
 
 class FilterCuVSProvider implements CuVSProvider {
@@ -52,6 +56,22 @@ class FilterCuVSProvider implements CuVSProvider {
   public CagraIndex.Builder newCagraIndexBuilder(CuVSResources cuVSResources)
       throws UnsupportedOperationException {
     return delegate.newCagraIndexBuilder(cuVSResources);
+  }
+
+  @Override
+  public FilterBitsetHandle newFilterBitsetHandle(long[] combinedLongs) {
+    return delegate.newFilterBitsetHandle(combinedLongs);
+  }
+
+  @Override
+  public MultiPartitionSearchResults searchCagraMultiPartition(
+      CuVSResources resources,
+      List<CagraIndex> indices,
+      CagraQuery query,
+      int k,
+      List<FilterBitsetHandle> filters)
+      throws Throwable {
+    return delegate.searchCagraMultiPartition(resources, indices, query, k, filters);
   }
 
   @Override
@@ -143,6 +163,11 @@ class FilterCuVSProvider implements CuVSProvider {
   @Override
   public HnswIndex hnswIndexFromCagra(HnswIndexParams arg0, CagraIndex arg1) throws Throwable {
     return delegate.hnswIndexFromCagra(arg0, arg1);
+  }
+
+  @Override
+  public void enableRMMAsyncMemory() {
+    delegate.enableRMMAsyncMemory();
   }
 
   @Override

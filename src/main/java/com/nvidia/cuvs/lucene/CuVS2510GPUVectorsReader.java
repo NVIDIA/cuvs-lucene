@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -66,6 +66,7 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
   private final IntObjectHashMap<FieldEntry> fields;
   private final IntObjectHashMap<GPUIndex> cuvsIndices;
   private final IndexInput cuvsIndexInput;
+  private final FilterBitsetCache filterBitsetCache;
 
   static {
     try {
@@ -86,7 +87,22 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
    */
   public CuVS2510GPUVectorsReader(SegmentReadState state, FlatVectorsReader flatReader)
       throws IOException {
+    this(state, flatReader, new FilterBitsetCache(FilterBitsetCacheConfig.DEFAULT));
+  }
+
+  /**
+   * Initializes the reader with the cache owned by its vectors format.
+   *
+   * @param state instance of the SegmentReadState
+   * @param flatReader instance of the FlatVectorsReader
+   * @param filterBitsetCache filter cache shared by readers from the same vectors format
+   * @throws IOException I/O exception
+   */
+  CuVS2510GPUVectorsReader(
+      SegmentReadState state, FlatVectorsReader flatReader, FilterBitsetCache filterBitsetCache)
+      throws IOException {
     this.flatVectorsReader = flatReader;
+    this.filterBitsetCache = filterBitsetCache;
     this.fieldInfos = state.fieldInfos;
     this.fields = new IntObjectHashMap<>();
     String metaFileName =
@@ -430,7 +446,10 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
         }
       }
       topK = Math.min(knnCollector.k() + 10, mask[0].cardinality());
-      maskLength = mask[0].length();
+      // numDocs must be the total vector count so cuVS sizes the prefilter to cover every ordinal.
+      // BitSet.length() is (highest set bit + 1), which under a selective filter is smaller than the
+      // vector count, leaving the trailing ordinals outside the filter and thus default-accepted.
+      maskLength = acceptedOrds.length();
     }
 
     try {
@@ -443,6 +462,9 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
               new CagraSearchParams.Builder()
                   .withItopkSize(Math.max(collector.getiTopK(), topK))
                   .withSearchWidth(collector.getSearchWidth())
+                  .withThreadBlockSize(collector.getThreadBlockSize())
+                  .withMaxIterations(collector.getMaxIterations())
+                  .withAlgo(collector.getSearchAlgo())
                   .build();
         } else {
           // Setting itopK as topK because in any case iTopK should be ATLEAST equal to topK
@@ -509,7 +531,11 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
         if (knnCollector.earlyTerminated()) {
           break;
         }
-        if (ord < 0) {
+        // Empty top-k slots (fewer than k passing candidates) carry a sentinel distance of FLT_MAX.
+        // Prefer this over the neighbor-index sentinel: the index sentinel is not uniform across
+        // CAGRA search algorithms (single-CTA emits 0x7FFFFFFF, multi-CTA 0xFFFFFFFF), so the
+        // distance is the reliable, algorithm-independent signal for an empty slot.
+        if (score == Float.MAX_VALUE || ord < 0) {
           continue;
         }
         float correctedScore = scoreCorrectionFunction.apply(score);
@@ -598,6 +624,27 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
               + versionVectorData,
           in);
     }
+  }
+
+  /**
+   * Returns the {@link CagraIndex} for the given field, or {@code null} if unavailable
+   * (e.g., during a merge or when the field is missing).
+   *
+   * @param field the vector field name
+   * @return the CAGRA index, or {@code null}
+   */
+  public CagraIndex getCagraIndexForField(String field) {
+    if (cuvsIndices == null) return null;
+    FieldInfo info = fieldInfos.fieldInfo(field);
+    if (info == null) return null;
+    GPUIndex gpuIndex = cuvsIndices.get(info.number);
+    if (gpuIndex == null) return null;
+    return gpuIndex.getCagraIndex();
+  }
+
+  /** Returns the filter cache owned by the vectors format that created this reader. */
+  FilterBitsetCache getFilterBitsetCache() {
+    return filterBitsetCache;
   }
 
   /**

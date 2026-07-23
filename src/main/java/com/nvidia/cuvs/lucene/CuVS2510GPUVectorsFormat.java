@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -35,7 +35,8 @@ public class CuVS2510GPUVectorsFormat extends KnnVectorsFormat {
   public static final int VERSION_START = 0;
   public static final int VERSION_CURRENT = VERSION_START;
 
-  private GPUSearchParams gpuSearchParams;
+  private final GPUSearchParams gpuSearchParams;
+  private final FilterBitsetCache filterBitsetCache;
 
   static {
     try {
@@ -53,7 +54,7 @@ public class CuVS2510GPUVectorsFormat extends KnnVectorsFormat {
    * @throws LibraryException if the native library fails to load
    */
   public CuVS2510GPUVectorsFormat() {
-    this(new GPUSearchParams.Builder().build());
+    this(new GPUSearchParams.Builder().build(), FilterBitsetCacheConfig.DEFAULT);
   }
 
   /**
@@ -63,8 +64,21 @@ public class CuVS2510GPUVectorsFormat extends KnnVectorsFormat {
    * @throws LibraryException if the native library fails to load
    */
   public CuVS2510GPUVectorsFormat(GPUSearchParams gpuSearchParams) {
+    this(gpuSearchParams, FilterBitsetCacheConfig.DEFAULT);
+  }
+
+  /**
+   * Initializes the format with GPU search and filter-bitset-cache parameters.
+   *
+   * @param gpuSearchParams GPU index and search parameters
+   * @param filterCacheConfig filter-bitset-cache configuration
+   * @throws LibraryException if the native library fails to load
+   */
+  public CuVS2510GPUVectorsFormat(
+      GPUSearchParams gpuSearchParams, FilterBitsetCacheConfig filterCacheConfig) {
     super("CuVS2510GPUVectorsFormat");
     this.gpuSearchParams = gpuSearchParams;
+    this.filterBitsetCache = new FilterBitsetCache(filterCacheConfig);
   }
 
   /**
@@ -83,7 +97,8 @@ public class CuVS2510GPUVectorsFormat extends KnnVectorsFormat {
   @Override
   public KnnVectorsReader fieldsReader(SegmentReadState state) throws IOException {
     assertIsSupported();
-    return new CuVS2510GPUVectorsReader(state, FLAT_VECTORS_FORMAT.fieldsReader(state));
+    return new CuVS2510GPUVectorsReader(
+        state, FLAT_VECTORS_FORMAT.fieldsReader(state), filterBitsetCache);
   }
 
   /**

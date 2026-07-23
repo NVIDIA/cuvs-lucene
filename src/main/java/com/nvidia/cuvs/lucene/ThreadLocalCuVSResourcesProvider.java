@@ -1,8 +1,7 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-
 package com.nvidia.cuvs.lucene;
 
 import com.nvidia.cuvs.CuVSResources;
@@ -42,9 +41,21 @@ public class ThreadLocalCuVSResourcesProvider {
     cuVSResources.set(resources);
   }
 
+  /** System property controlling the workspace pool size per resources handle (in bytes). */
+  public static final String WORKSPACE_POOL_SIZE_PROPERTY = "com.nvidia.cuvs.workspacePoolSize";
+
   private static CuVSResources cuVSResourcesOrNull() {
     try {
-      return CuVSResources.create();
+      CuVSResources resources = CuVSResources.create();
+      String poolSizeProp = System.getProperty(WORKSPACE_POOL_SIZE_PROPERTY);
+      if (poolSizeProp != null) {
+        long poolBytes = Long.parseLong(poolSizeProp);
+        if (poolBytes > 0) {
+          // RMM's pool_memory_resource requires the initial size to be a multiple of 256 bytes.
+          resources.setWorkspacePool((poolBytes + 255L) & ~255L);
+        }
+      }
+      return resources;
     } catch (UnsupportedOperationException uoe) {
       log.log(
           Level.WARNING,

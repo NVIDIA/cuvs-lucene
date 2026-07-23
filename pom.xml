@@ -12,7 +12,7 @@
   <groupId>com.nvidia.cuvs.lucene</groupId>
   <artifactId>cuvs-lucene</artifactId>
   <!-- NOTE: The version automatically gets updated when ci/release/update-version.sh is invoked. -->
-  <!--CUVS_LUCENE#VERSION_UPDATE_MARKER_START--><version>26.10.0</version><!--CUVS_LUCENE#VERSION_UPDATE_MARKER_END-->
+  <!--CUVS_LUCENE#VERSION_UPDATE_MARKER_START--><version>26.10.0-SNAPSHOT</version><!--CUVS_LUCENE#VERSION_UPDATE_MARKER_END-->
   <name>cuvs-lucene</name>
   <packaging>jar</packaging>
 
@@ -35,6 +35,18 @@
       <tag>HEAD</tag>
       <url>https://github.com/rapidsai/cuvs-lucene</url>
   </scm>
+
+  <developers>
+      <developer>
+          <id>rapidsai</id>
+          <name>rapidsai</name>
+          <email>cuvs@rapids.ai</email>
+          <roles>
+              <role>Maintainer</role>
+              <role>Committer</role>
+          </roles>
+      </developer>
+  </developers>
 
   <properties>
     <maven.compiler.target>22</maven.compiler.target>
@@ -67,6 +79,12 @@
             <snapshots>
                 <enabled>false</enabled>
             </snapshots>
+        </repository>
+        <repository>
+            <id>central-snapshots</id>
+            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+            <snapshots><enabled>true</enabled></snapshots>
+            <releases><enabled>false</enabled></releases>
         </repository>
     </repositories>
 
@@ -129,9 +147,16 @@
     <dependency>
       <groupId>com.nvidia.cuvs</groupId>
       <artifactId>cuvs-java</artifactId>
-      <!--CUVS_LUCENE#VERSION_UPDATE_MARKER_START--><version>26.10.0</version><!--CUVS_LUCENE#VERSION_UPDATE_MARKER_END-->
+      <!--CUVS_LUCENE#VERSION_UPDATE_MARKER_START--><version>26.10.0-SNAPSHOT</version><!--CUVS_LUCENE#VERSION_UPDATE_MARKER_END-->
     </dependency>
   </dependencies>
+
+  <distributionManagement>
+    <snapshotRepository>
+      <id>central</id>
+      <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+    </snapshotRepository>
+  </distributionManagement>
 
   <build>
     <plugins>
@@ -158,6 +183,9 @@
                     <reflowLongStrings>true</reflowLongStrings>
                     <formatJavadoc>false</formatJavadoc>
                 </googleJavaFormat>
+                <licenseHeader>
+                    <file>${project.basedir}/license-header.txt</file>
+                </licenseHeader>
             </java>
         </configuration>
       </plugin>
@@ -219,6 +247,7 @@
                 <goal>jar</goal>
             </goals>
             <configuration>
+                <includePackageNames>com.nvidia.cuvs.lucene</includePackageNames>
                 <doclint>all,-missing</doclint>
                 <outputDirectory>${project.build.directory}/javadocs</outputDirectory>
             </configuration>
