@@ -11,7 +11,7 @@ repos:
               - id: check-symlinks
               - id: check-xml
       - repo: https://github.com/rapidsai/pre-commit-hooks
-        rev: v1.5.1
+        rev: v1.6.0
         hooks:
           - id: verify-copyright
             name: verify-copyright
@@ -24,9 +24,8 @@ repos:
                   meta[.]yaml$|
                   dependencies[.]yaml$|
                   ^[.]pre-commit-config[.]yaml$
-          # TODO: Re-enable once verify-codeowners supports --org parameter
-          # - id: verify-codeowners
-          #   args: [--fix, --org=NVIDIA, --project-prefix=cuvs-lucene]
+          - id: verify-codeowners
+            args: [--fix, --org=NVIDIA, --project-prefix=cuvs-lucene, --no-cmake, --no-cpp, --no-packaging, --no-python]
       - repo: https://github.com/rapidsai/dependency-file-generator
         rev: v1.21.0
         hooks:
