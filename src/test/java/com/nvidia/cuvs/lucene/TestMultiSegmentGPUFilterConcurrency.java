@@ -75,11 +75,12 @@ public class TestMultiSegmentGPUFilterConcurrency extends LuceneTestCase {
   @BeforeClass
   public static void beforeClass() throws Exception {
     assumeTrue("cuVS not supported", isSupported());
-    // Start from a clean, lazily-derived budget so churn is driven only by this test's filters.
-    FilterBitsetCache.clear();
-    FilterBitsetCache.setEnabled(true);
-    FilterBitsetCache.setMaxBytes(0);
-    codec = new CuVS2510GPUSearchCodec();
+    // The explicit codec config applies while writing. DirectoryReader.open resolves the codec
+    // through SPI for reading, whose no-argument instance uses the same default, lazily-derived
+    // cache budget.
+    codec =
+        new CuVS2510GPUSearchCodec(
+            new GPUSearchParams.Builder().build(), FilterBitsetCacheConfig.DEFAULT);
 
     int datasetSize = 2000;
     int dimensions = 128;
@@ -189,8 +190,6 @@ public class TestMultiSegmentGPUFilterConcurrency extends LuceneTestCase {
   public static void afterClass() throws IOException {
     if (reader != null) reader.close();
     if (directory != null) directory.close();
-    FilterBitsetCache.clear();
-    FilterBitsetCache.setMaxBytes(0);
     reader = null;
     directory = null;
     searcher = null;

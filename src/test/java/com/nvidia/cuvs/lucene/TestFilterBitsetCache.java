@@ -29,8 +29,6 @@ import org.junit.Test;
  * Concurrency and sizing tests for {@link FilterBitsetCache}. These exercise the compute-once,
  * reference-counting, and byte-budget behavior in isolation by injecting a fake {@link
  * FilterBitsetHandle}, so no GPU or native library is required.
- *
- * <p>The cache is static, so each test resets it via {@link Before}/{@link After}.
  */
 public class TestFilterBitsetCache {
 
@@ -40,39 +38,17 @@ public class TestFilterBitsetCache {
   /** Representative per-entry byte size used by tests that don't care about sizing. */
   private static final long ENTRY_BYTES = 64;
 
+  private FilterBitsetCache cache;
+
   @Before
   public void resetCache() {
-    FilterBitsetCache.clear();
-    FilterBitsetCache.setEnabled(true);
-    FilterBitsetCache.setMaxBytes(HUGE_BUDGET);
+    cache = new FilterBitsetCache(new FilterBitsetCacheConfig(true, HUGE_BUDGET));
   }
 
   @After
   public void restoreDefaults() {
-    FilterBitsetCache.clear();
-    FilterBitsetCache.setEnabled(true);
-    FilterBitsetCache.setMaxBytes(0); // back to lazy-default derivation
-  }
-
-  /** The device pool property defaults to the resolved budget and never overrides an explicit one. */
-  @Test
-  public void filterPoolSizeDefaultsToBudget() {
-    String prop = FilterBitsetCache.PROP_FILTER_POOL_BYTES;
-    String saved = System.getProperty(prop);
-    System.clearProperty(prop);
-    try {
-      FilterBitsetCache.setMaxBytes(0); // lazy: budget derived from the first working set
-      FilterBitsetCache.onSearchWorkingSet(1_000);
-      long expected = FilterBitsetCache.DEFAULT_BUDGET_MULTIPLIER * 1_000; // below the ceiling
-      assertEquals(Long.toString(expected), System.getProperty(prop));
-
-      // A later, larger working set must not overwrite the already-published pool size.
-      FilterBitsetCache.onSearchWorkingSet(4_000);
-      assertEquals(Long.toString(expected), System.getProperty(prop));
-    } finally {
-      if (saved == null) System.clearProperty(prop);
-      else System.setProperty(prop, saved);
-    }
+    cache.clear();
+    cache = null;
   }
 
   /**
@@ -136,7 +112,7 @@ public class TestFilterBitsetCache {
             pool.submit(
                 () -> {
                   start.await();
-                  return FilterBitsetCache.acquire(
+                  return cache.acquire(
                       null,
                       segKey(field),
                       field,
@@ -179,7 +155,7 @@ public class TestFilterBitsetCache {
   @Test
   public void byteCapEvictsEldestWhenBudgetExceeded() throws Exception {
     // Budget holds two 64-byte entries; inserting a third must evict exactly the oldest.
-    FilterBitsetCache.setMaxBytes(2 * ENTRY_BYTES);
+    cache = new FilterBitsetCache(new FilterBitsetCacheConfig(true, 2 * ENTRY_BYTES));
 
     List<CountingHandle> handles = new ArrayList<>();
     for (int i = 0; i < 3; i++) {
@@ -187,7 +163,7 @@ public class TestFilterBitsetCache {
       handles.add(h);
       final String field = "bcap-" + i;
       FilterBitsetHandle got =
-          FilterBitsetCache.acquire(null, segKey(field), field, ENTRY_BYTES, () -> h);
+          cache.acquire(null, segKey(field), field, ENTRY_BYTES, () -> h);
       assertSame(h, got);
       got.decRef(); // caller finished; the cache keeps its reference
     }
@@ -198,7 +174,7 @@ public class TestFilterBitsetCache {
     assertFalse("third handle should still be cached", handles.get(2).freed.get());
     assertTrue(
         "total bytes must stay within budget",
-        FilterBitsetCache.currentBytesForTests() <= 2 * ENTRY_BYTES);
+        cache.currentBytesForTests() <= 2 * ENTRY_BYTES);
   }
 
   /** clear() releases every cache reference (freeing all handles) and resets byte accounting. */
@@ -209,31 +185,31 @@ public class TestFilterBitsetCache {
       CountingHandle h = new CountingHandle();
       handles.add(h);
       final String field = "clr-" + i;
-      FilterBitsetCache.acquire(null, segKey(field), field, ENTRY_BYTES, () -> h).decRef();
+      cache.acquire(null, segKey(field), field, ENTRY_BYTES, () -> h).decRef();
     }
-    assertTrue("entries charged to the budget", FilterBitsetCache.currentBytesForTests() > 0);
+    assertTrue("entries charged to the budget", cache.currentBytesForTests() > 0);
 
-    FilterBitsetCache.clear();
+    cache.clear();
 
     for (int i = 0; i < handles.size(); i++) {
       CountingHandle h = handles.get(i);
       assertTrue("handle " + i + " freed by clear()", h.freed.get());
       assertEquals("handle " + i + " closed exactly once", 1, h.closeCalls.get());
     }
-    assertEquals("byte accounting reset", 0, FilterBitsetCache.currentBytesForTests());
+    assertEquals("byte accounting reset", 0, cache.currentBytesForTests());
   }
 
   /** An entry larger than the whole budget is never cached; each acquire rebuilds it uncached. */
   @Test
   public void oversizedEntryIsNotCached() throws Exception {
-    FilterBitsetCache.setMaxBytes(2 * ENTRY_BYTES);
+    cache = new FilterBitsetCache(new FilterBitsetCacheConfig(true, 2 * ENTRY_BYTES));
     final long oversized = 4 * ENTRY_BYTES; // larger than the whole budget
     final String field = "oversized";
     AtomicInteger buildCount = new AtomicInteger();
 
     CountingHandle h1 = new CountingHandle();
     FilterBitsetHandle got1 =
-        FilterBitsetCache.acquire(
+        cache.acquire(
             null,
             segKey(field),
             field,
@@ -245,11 +221,11 @@ public class TestFilterBitsetCache {
     assertSame(h1, got1);
     got1.decRef(); // caller-owned; nothing else holds it
     assertTrue("uncached oversized handle freed once caller releases it", h1.freed.get());
-    assertEquals("nothing charged to the budget", 0, FilterBitsetCache.currentBytesForTests());
+    assertEquals("nothing charged to the budget", 0, cache.currentBytesForTests());
 
     CountingHandle h2 = new CountingHandle();
     FilterBitsetHandle got2 =
-        FilterBitsetCache.acquire(
+        cache.acquire(
             null,
             segKey(field),
             field,
@@ -263,14 +239,48 @@ public class TestFilterBitsetCache {
     assertEquals("oversized entry is rebuilt every time, never cached", 2, buildCount.get());
   }
 
-  /** The enabled flag round-trips; the query path uses it to route around the cache. */
+  /** The public default configuration preserves the previous enabled, lazily-sized behavior. */
   @Test
-  public void enabledFlagToggles() {
-    assertTrue(FilterBitsetCache.isEnabled());
-    FilterBitsetCache.setEnabled(false);
-    assertFalse(FilterBitsetCache.isEnabled());
-    FilterBitsetCache.setEnabled(true);
-    assertTrue(FilterBitsetCache.isEnabled());
+  public void defaultConfiguration() {
+    assertTrue(FilterBitsetCacheConfig.DEFAULT.enabled());
+    assertEquals(0, FilterBitsetCacheConfig.DEFAULT.maxBytes());
+  }
+
+  /** Entries and lifecycle operations are isolated between cache instances. */
+  @Test
+  public void cacheInstancesAreIndependent() throws Exception {
+    FilterBitsetCache other =
+        new FilterBitsetCache(new FilterBitsetCacheConfig(true, HUGE_BUDGET));
+    CountingHandle first = new CountingHandle();
+    CountingHandle second = new CountingHandle();
+    Object key = segKey("shared-reader-key");
+
+    cache.acquire(null, key, "f", ENTRY_BYTES, () -> first).decRef();
+    other.acquire(null, key, "f", ENTRY_BYTES, () -> second).decRef();
+
+    assertFalse(first.freed.get());
+    assertFalse(second.freed.get());
+    assertEquals(ENTRY_BYTES, cache.currentBytesForTests());
+    assertEquals(ENTRY_BYTES, other.currentBytesForTests());
+
+    cache.clear();
+
+    assertTrue("clearing the first cache releases its handle", first.freed.get());
+    assertFalse("clearing the first cache must not affect the second", second.freed.get());
+    assertEquals(0, cache.currentBytesForTests());
+    assertEquals(ENTRY_BYTES, other.currentBytesForTests());
+
+    other.clear();
+    assertTrue("the second cache releases its own handle", second.freed.get());
+  }
+
+  /** The enabled flag reflects the instance's immutable configuration. */
+  @Test
+  public void enabledFlagReflectsConfiguration() {
+    assertTrue(cache.isEnabled());
+    FilterBitsetCache disabled =
+        new FilterBitsetCache(new FilterBitsetCacheConfig(false, 0));
+    assertFalse(disabled.isEnabled());
   }
 
   /** invalidateReader evicts and frees exactly the given segment's entries, leaving others cached. */
@@ -283,7 +293,7 @@ public class TestFilterBitsetCache {
     AtomicInteger buildA = new AtomicInteger();
 
     // Cache one entry per segment, releasing the caller ref so the cache keeps its own.
-    FilterBitsetCache.acquire(
+    cache.acquire(
             null,
             keyA,
             "f",
@@ -293,10 +303,10 @@ public class TestFilterBitsetCache {
               return hA;
             })
         .decRef();
-    FilterBitsetCache.acquire(null, keyB, "f", ENTRY_BYTES, () -> hB).decRef();
+    cache.acquire(null, keyB, "f", ENTRY_BYTES, () -> hB).decRef();
 
     // Invalidate segment A only, as its reader's close listener would.
-    FilterBitsetCache.invalidateReader(keyA);
+    cache.invalidateReader(keyA);
 
     assertTrue("segment A handle freed on invalidation", hA.freed.get());
     assertEquals("segment A handle closed exactly once", 1, hA.closeCalls.get());
@@ -304,7 +314,7 @@ public class TestFilterBitsetCache {
     assertEquals("segment B handle must not be closed", 0, hB.closeCalls.get());
 
     // Segment A's entry is gone, so a later acquire rebuilds it.
-    FilterBitsetCache.acquire(
+    cache.acquire(
             null,
             keyA,
             "f",
@@ -324,7 +334,7 @@ public class TestFilterBitsetCache {
     AtomicInteger buildCount = new AtomicInteger();
 
     try {
-      FilterBitsetCache.acquire(
+      cache.acquire(
           null,
           segKey(field),
           field,
@@ -338,11 +348,11 @@ public class TestFilterBitsetCache {
       assertEquals("boom", expected.getMessage());
     }
     assertEquals(1, buildCount.get());
-    assertEquals("failed build must not charge the budget", 0, FilterBitsetCache.currentBytesForTests());
+    assertEquals("failed build must not charge the budget", 0, cache.currentBytesForTests());
 
     CountingHandle handle = new CountingHandle();
     FilterBitsetHandle got =
-        FilterBitsetCache.acquire(
+        cache.acquire(
             null,
             segKey(field),
             field,
@@ -381,7 +391,7 @@ public class TestFilterBitsetCache {
                     final String field = "stress-" + ((seed + i) % keySpace);
                     // A fresh handle per build; a cached key reuses whatever was built first.
                     FilterBitsetHandle h =
-                        FilterBitsetCache.acquire(
+                        cache.acquire(
                             null, segKey(field), field, ENTRY_BYTES, CountingHandle::new);
                     h.decRef();
                   }

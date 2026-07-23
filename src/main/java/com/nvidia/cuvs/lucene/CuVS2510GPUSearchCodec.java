@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -29,8 +29,11 @@ public class CuVS2510GPUSearchCodec extends FilterCodec {
    * @throws Exception
    */
   public CuVS2510GPUSearchCodec() throws Exception {
-    this(NAME, LuceneProvider.getCodec("101"));
-    initializeFormat(new GPUSearchParams.Builder().build());
+    this(
+        NAME,
+        LuceneProvider.getCodec("101"),
+        new GPUSearchParams.Builder().build(),
+        FilterBitsetCacheConfig.DEFAULT);
   }
 
   /**
@@ -41,8 +44,11 @@ public class CuVS2510GPUSearchCodec extends FilterCodec {
    * @param delegate the delegate codec
    */
   public CuVS2510GPUSearchCodec(String name, Codec delegate) {
-    super(name, delegate);
-    initializeFormat(new GPUSearchParams.Builder().build());
+    this(
+        name,
+        delegate,
+        new GPUSearchParams.Builder().build(),
+        FilterBitsetCacheConfig.DEFAULT);
   }
 
   /**
@@ -53,18 +59,48 @@ public class CuVS2510GPUSearchCodec extends FilterCodec {
    * @throws Exception Exception raised when initializing the codec
    */
   public CuVS2510GPUSearchCodec(GPUSearchParams params) throws Exception {
-    this(NAME, LuceneProvider.getCodec("101"));
-    initializeFormat(params);
+    this(NAME, LuceneProvider.getCodec("101"), params, FilterBitsetCacheConfig.DEFAULT);
+  }
+
+  /**
+   * Initialize the codec with GPU search and filter-bitset-cache parameters.
+   *
+   * @param params GPU index and search parameters
+   * @param filterCacheConfig filter-bitset-cache configuration
+   * @throws Exception Exception raised when initializing the codec
+   */
+  public CuVS2510GPUSearchCodec(
+      GPUSearchParams params, FilterBitsetCacheConfig filterCacheConfig) throws Exception {
+    this(NAME, LuceneProvider.getCodec("101"), params, filterCacheConfig);
+  }
+
+  /**
+   * Initialize a named codec with explicit delegate, GPU search, and filter-cache parameters.
+   *
+   * @param name the name of the codec
+   * @param delegate the delegate codec
+   * @param params GPU index and search parameters
+   * @param filterCacheConfig filter-bitset-cache configuration
+   */
+  public CuVS2510GPUSearchCodec(
+      String name,
+      Codec delegate,
+      GPUSearchParams params,
+      FilterBitsetCacheConfig filterCacheConfig) {
+    super(name, delegate);
+    initializeFormat(params, filterCacheConfig);
   }
 
   /**
    * Initialize the {@link CuVS2510GPUVectorsFormat} instance using {@link GPUSearchParams}.
    *
    * @param params an instance of {@link GPUSearchParams}
+   * @param filterCacheConfig filter-bitset-cache configuration
    */
-  private void initializeFormat(GPUSearchParams params) {
+  private void initializeFormat(
+      GPUSearchParams params, FilterBitsetCacheConfig filterCacheConfig) {
     try {
-      format = new CuVS2510GPUVectorsFormat(params);
+      format = new CuVS2510GPUVectorsFormat(params, filterCacheConfig);
       setKnnFormat(format);
     } catch (LibraryException ex) {
       log.log(

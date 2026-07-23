@@ -66,6 +66,7 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
   private final IntObjectHashMap<FieldEntry> fields;
   private final IntObjectHashMap<GPUIndex> cuvsIndices;
   private final IndexInput cuvsIndexInput;
+  private final FilterBitsetCache filterBitsetCache;
 
   static {
     try {
@@ -86,7 +87,22 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
    */
   public CuVS2510GPUVectorsReader(SegmentReadState state, FlatVectorsReader flatReader)
       throws IOException {
+    this(state, flatReader, new FilterBitsetCache(FilterBitsetCacheConfig.DEFAULT));
+  }
+
+  /**
+   * Initializes the reader with the cache owned by its vectors format.
+   *
+   * @param state instance of the SegmentReadState
+   * @param flatReader instance of the FlatVectorsReader
+   * @param filterBitsetCache filter cache shared by readers from the same vectors format
+   * @throws IOException I/O exception
+   */
+  CuVS2510GPUVectorsReader(
+      SegmentReadState state, FlatVectorsReader flatReader, FilterBitsetCache filterBitsetCache)
+      throws IOException {
     this.flatVectorsReader = flatReader;
+    this.filterBitsetCache = filterBitsetCache;
     this.fieldInfos = state.fieldInfos;
     this.fields = new IntObjectHashMap<>();
     String metaFileName =
@@ -624,6 +640,11 @@ public class CuVS2510GPUVectorsReader extends KnnVectorsReader {
     GPUIndex gpuIndex = cuvsIndices.get(info.number);
     if (gpuIndex == null) return null;
     return gpuIndex.getCagraIndex();
+  }
+
+  /** Returns the filter cache owned by the vectors format that created this reader. */
+  FilterBitsetCache getFilterBitsetCache() {
+    return filterBitsetCache;
   }
 
   /**

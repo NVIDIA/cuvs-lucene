@@ -18,7 +18,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.CodecReader;
@@ -311,7 +313,8 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
     boolean[] needsFilter = new boolean[n];
     FloatVectorValues[] fvvs = new FloatVectorValues[n];
     long[] entryBytes = new long[n];
-    long workingSetBytes = 0;
+    FilterBitsetCache[] caches = new FilterBitsetCache[n];
+    Map<FilterBitsetCache, Long> workingSetBytesByCache = new IdentityHashMap<>();
     for (int i = 0; i < n; i++) {
       LeafReaderContext ctx = leaves.get(i);
       // No explicit filter and no deletes in this segment: no filter for this partition.
@@ -319,46 +322,59 @@ public class GPUKnnFloatVectorQuery extends KnnFloatVectorQuery {
         continue;
       }
       needsFilter[i] = true;
+      FilterBitsetCache cache = gpuReaders.get(i).getFilterBitsetCache();
+      caches[i] = cache;
       FloatVectorValues fvv = gpuReaders.get(i).getFloatVectorValues(field);
       fvvs[i] = fvv;
       // Bytes to hold one bit per vector, word-aligned: this segment's cache-entry size.
       long segBytes = (((long) fvv.size() + 63) / 64) * 8;
       entryBytes[i] = segBytes;
-      workingSetBytes += segBytes;
+      if (cache.isEnabled()) {
+        workingSetBytesByCache.merge(cache, segBytes, Long::sum);
+      }
     }
 
-    boolean cacheEnabled = FilterBitsetCache.isEnabled();
-    if (cacheEnabled) {
-      // Resolves the lazy default budget (and validates an explicit one) before any acquire.
-      FilterBitsetCache.onSearchWorkingSet(workingSetBytes);
+    // Resolve each cache's lazy default budget (and validate an explicit one) before any acquire.
+    for (Map.Entry<FilterBitsetCache, Long> entry : workingSetBytesByCache.entrySet()) {
+      entry.getKey().onSearchWorkingSet(entry.getValue());
     }
 
     List<FilterBitsetHandle> handles = new ArrayList<>(n);
-    for (int i = 0; i < n; i++) {
-      if (!needsFilter[i]) {
-        handles.add(null);
-        continue;
+    try {
+      for (int i = 0; i < n; i++) {
+        if (!needsFilter[i]) {
+          handles.add(null);
+          continue;
+        }
+        LeafReaderContext ctx = leaves.get(i);
+        FloatVectorValues fvv = fvvs[i];
+        FilterBitsetCache cache = caches[i];
+        // When caching is disabled, route every segment through the uncached, caller-owned path.
+        var helper = cache.isEnabled() ? ctx.reader().getReaderCacheHelper() : null;
+        if (helper == null) {
+          // This reader can't be cached; build an uncached handle owned outright by the caller.
+          handles.add(buildSegmentFilterHandle(sharedFilterWeight, ctx, fvv));
+        } else {
+          // Evict entries when this segment reader closes (merge/reopen), not just on LRU.
+          cache.ensureCloseListener(helper);
+          handles.add(
+              cache.acquire(
+                  filter,
+                  helper.getKey(),
+                  field,
+                  entryBytes[i],
+                  () -> buildSegmentFilterHandle(sharedFilterWeight, ctx, fvv)));
+        }
       }
-      LeafReaderContext ctx = leaves.get(i);
-      FloatVectorValues fvv = fvvs[i];
-      // When caching is disabled, route every segment through the uncached, caller-owned path.
-      var helper = cacheEnabled ? ctx.reader().getReaderCacheHelper() : null;
-      if (helper == null) {
-        // This reader can't be cached; build an uncached handle owned outright by the caller.
-        handles.add(buildSegmentFilterHandle(sharedFilterWeight, ctx, fvv));
-      } else {
-        // Evict this segment's cache entries when its reader closes (merge/reopen), not just on LRU.
-        FilterBitsetCache.ensureCloseListener(helper);
-        handles.add(
-            FilterBitsetCache.acquire(
-                filter,
-                helper.getKey(),
-                field,
-                entryBytes[i],
-                () -> buildSegmentFilterHandle(sharedFilterWeight, ctx, fvv)));
+      return handles;
+    } catch (IOException | RuntimeException | Error e) {
+      // The caller cannot release a partially constructed list, so release every acquired handle
+      // here before propagating the failure.
+      for (FilterBitsetHandle handle : handles) {
+        if (handle != null) handle.decRef();
       }
+      throw e;
     }
-    return handles;
   }
 
   /**
