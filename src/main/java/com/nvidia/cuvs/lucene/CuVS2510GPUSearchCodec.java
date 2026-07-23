@@ -29,7 +29,7 @@ public class CuVS2510GPUSearchCodec extends FilterCodec {
    * @throws Exception
    */
   public CuVS2510GPUSearchCodec() throws Exception {
-    this(NAME, LuceneProvider.getCodec("101"));
+    this(NAME, LuceneProvider.getDefaultDelegateCodec());
     initializeFormat(new GPUSearchParams.Builder().build());
   }
 
@@ -53,7 +53,7 @@ public class CuVS2510GPUSearchCodec extends FilterCodec {
    * @throws Exception Exception raised when initializing the codec
    */
   public CuVS2510GPUSearchCodec(GPUSearchParams params) throws Exception {
-    this(NAME, LuceneProvider.getCodec("101"));
+    this(NAME, LuceneProvider.getDefaultDelegateCodec());
     initializeFormat(params);
   }
 

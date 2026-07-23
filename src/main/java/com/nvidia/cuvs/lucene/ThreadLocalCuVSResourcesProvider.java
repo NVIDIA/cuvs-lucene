@@ -18,6 +18,7 @@ public class ThreadLocalCuVSResourcesProvider {
 
   private static final Logger log =
       Logger.getLogger(ThreadLocalCuVSResourcesProvider.class.getName());
+  static final String FORCE_CPU_HNSW_FALLBACK_PROPERTY = "cuvs.lucene.forceCpuHnswFallback";
   private static final ThreadLocal<CuVSResources> cuVSResources;
 
   static {
@@ -30,6 +31,9 @@ public class ThreadLocalCuVSResourcesProvider {
    * @return an instance of CuVSResources
    */
   public static CuVSResources getCuVSResourcesInstance() {
+    if (isCpuHnswFallbackForced()) {
+      return null;
+    }
     return cuVSResources.get();
   }
 
@@ -75,7 +79,7 @@ public class ThreadLocalCuVSResourcesProvider {
    * @throws UnsupportedOperationException
    */
   public static void assertIsSupported() throws UnsupportedOperationException {
-    if (cuVSResources.get() == null) {
+    if (isCpuHnswFallbackForced() || cuVSResources.get() == null) {
       throw new UnsupportedOperationException("cuVS is not supported");
     }
   }
@@ -86,6 +90,10 @@ public class ThreadLocalCuVSResourcesProvider {
    * @return true if cuVS is supported else false
    */
   public static boolean isSupported() {
-    return cuVSResources.get() != null;
+    return !isCpuHnswFallbackForced() && cuVSResources.get() != null;
+  }
+
+  static boolean isCpuHnswFallbackForced() {
+    return Boolean.getBoolean(FORCE_CPU_HNSW_FALLBACK_PROPERTY);
   }
 }

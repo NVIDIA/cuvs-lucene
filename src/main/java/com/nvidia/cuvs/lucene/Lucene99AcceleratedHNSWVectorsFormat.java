@@ -4,6 +4,7 @@
  */
 package com.nvidia.cuvs.lucene;
 
+import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.isCpuHnswFallbackForced;
 import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.isSupported;
 
 import com.nvidia.cuvs.LibraryException;
@@ -79,9 +80,13 @@ public class Lucene99AcceleratedHNSWVectorsFormat extends KnnVectorsFormat {
       log.log(Level.FINE, "cuVS is supported so using the Lucene99AcceleratedHNSWVectorsWriter");
       return new Lucene99AcceleratedHNSWVectorsWriter(state, acceleratedHNSWParams, flatWriter);
     } else {
+      boolean forcedCpuFallback = isCpuHnswFallbackForced();
       log.log(
-          Level.WARNING,
-          "GPU based indexing not supported, falling back to using the Lucene99HnswVectorsWriter");
+          forcedCpuFallback ? Level.FINE : Level.WARNING,
+          forcedCpuFallback
+              ? "Forced CPU HNSW fallback, using the Lucene99HnswVectorsWriter"
+              : "GPU based indexing not supported, falling back to using the"
+                  + " Lucene99HnswVectorsWriter");
       try {
         return LUCENE_PROVIDER.getLuceneHnswVectorsWriterInstance(
             state,
@@ -94,6 +99,11 @@ public class Lucene99AcceleratedHNSWVectorsFormat extends KnnVectorsFormat {
         throw new RuntimeException(e.getMessage());
       }
     }
+  }
+
+  @Override
+  public String toString() {
+    return getName() + "(" + WriterTelemetry.forHnsw(acceleratedHNSWParams) + ")";
   }
 
   /**

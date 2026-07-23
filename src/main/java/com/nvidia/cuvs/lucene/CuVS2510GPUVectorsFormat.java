@@ -77,6 +77,11 @@ public class CuVS2510GPUVectorsFormat extends KnnVectorsFormat {
     return new CuVS2510GPUVectorsWriter(state, gpuSearchParams, flatWriter);
   }
 
+  @Override
+  public String toString() {
+    return getName() + "(" + WriterTelemetry.forCagra() + ")";
+  }
+
   /**
    * Returns a KnnVectorsReader instance to read the vectors from the index.
    */
