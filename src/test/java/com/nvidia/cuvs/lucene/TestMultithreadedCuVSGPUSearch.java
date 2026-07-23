@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -9,6 +9,7 @@ import static com.nvidia.cuvs.lucene.TestUtils.generateDataset;
 import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.isSupported;
 import static org.apache.lucene.index.VectorSimilarityFunction.EUCLIDEAN;
 
+import com.nvidia.cuvs.spi.CuVSProvider;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Random;
@@ -58,6 +59,11 @@ public class TestMultithreadedCuVSGPUSearch extends LuceneTestCase {
 
   @BeforeClass
   public static void beforeClass() throws IOException {
+    try {
+      CuVSProvider.provider().enableRMMAsyncMemory();
+    } catch (UnsupportedOperationException unsupported) {
+      assumeTrue("cuVS not supported: " + unsupported.getMessage(), false);
+    }
     assumeTrue("cuVS not supported", isSupported());
     random = random();
     directory = newDirectory(new ByteBuffersDirectory());

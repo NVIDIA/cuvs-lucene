@@ -62,6 +62,21 @@ The example below plugs the GPU-accelerated HNSW codec into a standard Lucene `I
 
 Before running it, make sure cuVS is installed and available on your system library load path. The cuVS [tarball install instructions](https://docs.rapids.ai/api/cuvs/stable/build/#download-extract) show how to set this up.
 
+### RMM async allocation for GPU search
+
+Applications using `CuVS2510GPUSearchCodec` can opt into RMM's stream-ordered asynchronous device
+allocator during startup:
+
+```java
+CuVSProvider.provider().enableRMMAsyncMemory();
+```
+
+Call this before creating any cuVS resources, codecs, writers, or readers. The setting affects the
+entire process on the current CUDA device, so allocator policy belongs to the application rather
+than an individual Lucene codec. Async allocation is optional for correctness and recommended for
+GPU workloads with repeated device allocations, especially concurrent or multi-stream searches.
+Applications that do not opt in use the default RMM device-memory resource.
+
 In a Maven project that includes the `cuvs-lucene` dependency shown above, create `src/main/java/com/nvidia/cuvs/lucene/examples/HelloCuvsLucene.java`:
 
 ```java

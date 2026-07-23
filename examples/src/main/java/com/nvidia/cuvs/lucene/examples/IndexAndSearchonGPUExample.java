@@ -10,6 +10,7 @@ import static org.apache.lucene.index.VectorSimilarityFunction.EUCLIDEAN;
 import com.nvidia.cuvs.lucene.CuVS2510GPUSearchCodec;
 import com.nvidia.cuvs.lucene.GPUKnnFloatVectorQuery;
 import com.nvidia.cuvs.lucene.GPUSearchParams;
+import com.nvidia.cuvs.spi.CuVSProvider;
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -48,6 +49,9 @@ public class IndexAndSearchonGPUExample {
   private static Path indexDirPath;
 
   public static void main(String[] args) throws Exception {
+
+    // Select the process-wide RMM allocator before creating any cuVS resources or codecs.
+    CuVSProvider.provider().enableRMMAsyncMemory();
 
     GPUSearchParams params = new GPUSearchParams.Builder().build();
     Codec codec = new CuVS2510GPUSearchCodec(params);

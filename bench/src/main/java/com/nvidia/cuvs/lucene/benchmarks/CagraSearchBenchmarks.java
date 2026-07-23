@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene.benchmarks;
@@ -11,6 +11,7 @@ import static com.nvidia.cuvs.lucene.benchmarks.Utils.search;
 
 import com.nvidia.cuvs.lucene.CuVS2510GPUSearchCodec;
 import com.nvidia.cuvs.lucene.GPUKnnFloatVectorQuery;
+import com.nvidia.cuvs.spi.CuVSProvider;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -62,6 +63,7 @@ public class CagraSearchBenchmarks {
 
   @Setup(Level.Trial)
   public void setup() throws Exception {
+    CuVSProvider.provider().enableRMMAsyncMemory();
     random = new Random(222);
     indexDirPath = Paths.get(UUID.randomUUID().toString());
     codec = new CuVS2510GPUSearchCodec();

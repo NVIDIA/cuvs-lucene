@@ -9,6 +9,7 @@ import static com.nvidia.cuvs.lucene.TestUtils.generateDataset;
 import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.isSupported;
 import static org.apache.lucene.index.VectorSimilarityFunction.EUCLIDEAN;
 
+import com.nvidia.cuvs.spi.CuVSProvider;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -74,6 +75,11 @@ public class TestMultiSegmentGPUFilterConcurrency extends LuceneTestCase {
 
   @BeforeClass
   public static void beforeClass() throws Exception {
+    try {
+      CuVSProvider.provider().enableRMMAsyncMemory();
+    } catch (UnsupportedOperationException unsupported) {
+      assumeTrue("cuVS not supported: " + unsupported.getMessage(), false);
+    }
     assumeTrue("cuVS not supported", isSupported());
     // The explicit codec config applies while writing. DirectoryReader.open resolves the codec
     // through SPI for reading, whose no-argument instance uses the same default, lazily-derived
