@@ -27,6 +27,11 @@ public class Utils {
 
   static final Logger log = Logger.getLogger(Utils.class.getName());
 
+  public enum Target {
+    DEVICE,
+    HOST
+  }
+
   /**
    * A utility method that throws specific types of throwable objects based on types.
    *
@@ -51,19 +56,22 @@ public class Utils {
    * @param data The float vectors
    * @param dimensions The number float elements in each vector
    * @param resources The CuVS resources for device matrix creation
+   * @param target To build the matrix on device or host
    * @return an instance of CuVSMatrix
    */
-  static CuVSMatrix createFloatMatrix(List<float[]> data, int dimensions, CuVSResources resources) {
-    // Use Builder pattern to avoid intermediate float[][] allocation
-    // and copy directly from List to device memory
-    CuVSMatrix.Builder<?> builder =
-        CuVSMatrix.deviceBuilder(
-            resources,
-            data.size(), // rows (number of vectors)
-            dimensions, // columns (vector dimension)
-            CuVSMatrix.DataType.FLOAT);
+  static CuVSMatrix createFloatMatrix(
+      List<float[]> data, int dimensions, CuVSResources resources, Target target) {
+    CuVSMatrix.Builder<?> builder = null;
 
-    // Add vectors one by one - builder copies directly to device memory
+    switch (target) {
+      case DEVICE:
+        builder =
+            CuVSMatrix.deviceBuilder(resources, data.size(), dimensions, CuVSMatrix.DataType.FLOAT);
+      case HOST:
+        builder = CuVSMatrix.hostBuilder(data.size(), dimensions, CuVSMatrix.DataType.FLOAT);
+    }
+    assert builder != null;
+
     for (float[] vector : data) {
       builder.addVector(vector);
     }

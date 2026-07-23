@@ -19,7 +19,7 @@ import com.nvidia.cuvs.CuVSIvfPqSearchParams;
  */
 public class CagraIndexParamsFactory {
 
-  private static final int ALGO_SWITCH_THRESHOLD = 5_000_000;
+  private static final int ALGO_SWITCH_THRESHOLD = 1_000_000;
 
   /**
    * Translation of the internal logic found here:

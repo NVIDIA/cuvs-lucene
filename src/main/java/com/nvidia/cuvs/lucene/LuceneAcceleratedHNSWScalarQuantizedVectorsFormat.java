@@ -30,6 +30,7 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsFormat extends KnnVector
   private static final int MAX_DIMENSIONS = 4096;
 
   private final AcceleratedHNSWParams acceleratedHNSWParams;
+  private final CuVSResourcesManager cuvsResourcesManager;
 
   static {
     try {
@@ -58,6 +59,11 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsFormat extends KnnVector
       AcceleratedHNSWParams acceleratedHNSWParams) {
     super("Lucene99AcceleratedHNSWScalarQuantizedVectorsFormat");
     this.acceleratedHNSWParams = acceleratedHNSWParams;
+    if (isSupported()) {
+      cuvsResourcesManager = new CuVSResourcesManager(acceleratedHNSWParams.getWriterThreads());
+    } else {
+      cuvsResourcesManager = null; // Will not be needed in fallback mode.
+    }
   }
 
   /**
@@ -69,7 +75,7 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsFormat extends KnnVector
     if (isSupported()) {
       log.info("cuVS is supported so using the Lucene99AcceleratedHNSWQuantizedVectorsWriter");
       return new LuceneAcceleratedHNSWScalarQuantizedVectorsWriter(
-          state, acceleratedHNSWParams, flatWriter);
+          state, acceleratedHNSWParams, flatWriter, cuvsResourcesManager);
     } else {
       try {
         // Fallback to Lucene's Lucene99HnswScalarQuantizedVectorsFormat

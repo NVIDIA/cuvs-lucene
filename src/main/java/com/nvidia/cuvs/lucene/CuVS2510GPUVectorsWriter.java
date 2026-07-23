@@ -11,6 +11,7 @@ import static com.nvidia.cuvs.lucene.CuVS2510GPUVectorsFormat.CUVS_META_CODEC_NA
 import static com.nvidia.cuvs.lucene.CuVS2510GPUVectorsFormat.VERSION_CURRENT;
 import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.closeCuVSResourcesInstance;
 import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.getCuVSResourcesInstance;
+import static com.nvidia.cuvs.lucene.Utils.Target.HOST;
 import static com.nvidia.cuvs.lucene.Utils.info;
 import static org.apache.lucene.index.VectorEncoding.FLOAT32;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
@@ -202,7 +203,7 @@ public class CuVS2510GPUVectorsWriter extends KnnVectorsWriter {
         try {
           CuVSMatrix cagraDataset =
               Utils.createFloatMatrix(
-                  vectors, fieldInfo.getVectorDimension(), getCuVSResourcesInstance());
+                  vectors, fieldInfo.getVectorDimension(), getCuVSResourcesInstance(), HOST);
           writeCagraIndex(cagraIndexOutputStream, cagraDataset);
         } catch (Throwable t) {
           // Fallback to brute force in a few cases, for now.
@@ -216,7 +217,7 @@ public class CuVS2510GPUVectorsWriter extends KnnVectorsWriter {
         var bruteForceIndexOutputStream = new IndexOutputOutputStream(cuvsIndex);
         CuVSMatrix bruteforceDataset =
             Utils.createFloatMatrix(
-                vectors, fieldInfo.getVectorDimension(), getCuVSResourcesInstance());
+                vectors, fieldInfo.getVectorDimension(), getCuVSResourcesInstance(), HOST);
 
         writeBruteForceIndex(bruteForceIndexOutputStream, bruteforceDataset);
         bruteForceIndexLength = cuvsIndex.getFilePointer() - bruteForceIndexOffset;

@@ -31,6 +31,7 @@ public class Lucene99AcceleratedHNSWVectorsFormat extends KnnVectorsFormat {
   private static final FlatVectorsFormat FLAT_VECTORS_FORMAT;
   private static final int MAX_DIMENSIONS = 4096;
   private final AcceleratedHNSWParams acceleratedHNSWParams;
+  private final CuVSResourcesManager cuvsResourcesManager;
 
   static final String HNSW_META_CODEC_NAME = "Lucene99HnswVectorsFormatMeta";
   static final String HNSW_META_CODEC_EXT = "vem";
@@ -67,6 +68,11 @@ public class Lucene99AcceleratedHNSWVectorsFormat extends KnnVectorsFormat {
   public Lucene99AcceleratedHNSWVectorsFormat(AcceleratedHNSWParams acceleratedHNSWParams) {
     super("Lucene99AcceleratedHNSWVectorsFormat");
     this.acceleratedHNSWParams = acceleratedHNSWParams;
+    if (isSupported()) {
+      cuvsResourcesManager = new CuVSResourcesManager(acceleratedHNSWParams.getWriterThreads());
+    } else {
+      cuvsResourcesManager = null; // Will not be needed in fallback mode.
+    }
   }
 
   /**
@@ -77,7 +83,8 @@ public class Lucene99AcceleratedHNSWVectorsFormat extends KnnVectorsFormat {
     var flatWriter = FLAT_VECTORS_FORMAT.fieldsWriter(state);
     if (isSupported()) {
       log.log(Level.FINE, "cuVS is supported so using the Lucene99AcceleratedHNSWVectorsWriter");
-      return new Lucene99AcceleratedHNSWVectorsWriter(state, acceleratedHNSWParams, flatWriter);
+      return new Lucene99AcceleratedHNSWVectorsWriter(
+          state, acceleratedHNSWParams, flatWriter, cuvsResourcesManager);
     } else {
       log.log(
           Level.WARNING,

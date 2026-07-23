@@ -15,8 +15,6 @@ import static com.nvidia.cuvs.lucene.Lucene99AcceleratedHNSWVectorsFormat.HNSW_I
 import static com.nvidia.cuvs.lucene.Lucene99AcceleratedHNSWVectorsFormat.HNSW_INDEX_EXT;
 import static com.nvidia.cuvs.lucene.Lucene99AcceleratedHNSWVectorsFormat.HNSW_META_CODEC_EXT;
 import static com.nvidia.cuvs.lucene.Lucene99AcceleratedHNSWVectorsFormat.HNSW_META_CODEC_NAME;
-import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.closeCuVSResourcesInstance;
-import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.getCuVSResourcesInstance;
 import static org.apache.lucene.index.VectorEncoding.FLOAT32;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 import static org.apache.lucene.util.RamUsageEstimator.shallowSizeOfInstance;
@@ -25,6 +23,7 @@ import com.nvidia.cuvs.CagraIndex;
 import com.nvidia.cuvs.CagraIndexParams;
 import com.nvidia.cuvs.CuVSMatrix;
 import com.nvidia.cuvs.lucene.AcceleratedHNSWUtils.QuantizationType;
+import com.nvidia.cuvs.lucene.CuVSResourcesManager.ManagedCuVSResources;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -65,6 +64,7 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
   private final List<FieldWriter> fields = new ArrayList<>();
   private final InfoStream infoStream;
   private final AcceleratedHNSWParams acceleratedHNSWParams;
+  private final CuVSResourcesManager cuvsResourcesManager;
   private IndexOutput hnswMeta = null, hnswVectorIndex = null;
   private boolean finished;
   private String vemFileName;
@@ -90,12 +90,14 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
   public LuceneAcceleratedHNSWScalarQuantizedVectorsWriter(
       SegmentWriteState state,
       AcceleratedHNSWParams acceleratedHNSWParams,
-      FlatVectorsWriter flatVectorsWriter)
+      FlatVectorsWriter flatVectorsWriter,
+      CuVSResourcesManager cuvsResourcesManager)
       throws IOException {
     super();
     this.acceleratedHNSWParams = acceleratedHNSWParams;
     this.flatVectorsWriter = flatVectorsWriter;
     this.infoStream = state.infoStream;
+    this.cuvsResourcesManager = cuvsResourcesManager;
 
     vemFileName =
         IndexFileNames.segmentFileName(
@@ -164,12 +166,21 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
    * @param fieldInfo instance of FieldInfo that has the field description
    * @param vectors quantized vectors
    * @throws IOException
+   * @throws InterruptedException
    */
-  private void writeFieldInternal(FieldInfo fieldInfo, List<?> vectors) throws IOException {
+  private void writeFieldInternal(FieldInfo fieldInfo, List<?> vectors)
+      throws IOException, InterruptedException {
     if (vectors.size() == 0) {
       writeEmpty(fieldInfo, hnswMeta);
       return;
     }
+
+    CagraIndexParams params =
+        CagraIndexParamsFactory.create(
+            acceleratedHNSWParams, vectors.size(), fieldInfo.getVectorDimension());
+    ManagedCuVSResources managedCuVSResources =
+        cuvsResourcesManager.acquireResource(
+            vectors.size(), fieldInfo.getVectorDimension(), params);
 
     try {
       int dimensions = fieldInfo.getVectorDimension();
@@ -182,18 +193,15 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
 
       // Create CuVSMatrix with BYTE data type (unsigned bytes)
       CuVSMatrix dataset =
-          Utils.createByteMatrix(unsignedVectors, dimensions, getCuVSResourcesInstance());
+          Utils.createByteMatrix(unsignedVectors, dimensions, managedCuVSResources.getResource());
 
       if (dataset.size() < 2) {
         writeSingleVectorGraph(fieldInfo, unsignedVectors);
         return;
       }
 
-      CagraIndexParams params =
-          CagraIndexParamsFactory.create(acceleratedHNSWParams, dataset.size(), dataset.columns());
-
       CagraIndex cagraIndex =
-          CagraIndex.newBuilder(getCuVSResourcesInstance())
+          CagraIndex.newBuilder(managedCuVSResources.getResource())
               .withDataset(dataset)
               .withIndexParams(params)
               .build();
@@ -211,7 +219,8 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
               acceleratedHNSWParams.getHnswLayers(),
               acceleratedHNSWParams.getGraphdegree(),
               params,
-              QuantizationType.SCALAR);
+              QuantizationType.SCALAR,
+              managedCuVSResources.getResource());
 
       long vectorIndexOffset = hnswVectorIndex.getFilePointer();
 
@@ -235,6 +244,8 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
       cagraIndex.close();
     } catch (Throwable t) {
       Utils.handleThrowable(t);
+    } finally {
+      cuvsResourcesManager.releaseResource(managedCuVSResources);
     }
   }
 
@@ -244,12 +255,16 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
   @Override
   public void flush(int maxDoc, DocMap sortMap) throws IOException {
     flatVectorsWriter.flush(maxDoc, sortMap);
-    for (var field : fields) {
-      if (sortMap == null) {
-        writeField(field);
-      } else {
-        writeSortingField(field, sortMap);
+    try {
+      for (var field : fields) {
+        if (sortMap == null) {
+          writeField(field);
+        } else {
+          writeSortingField(field, sortMap);
+        }
       }
+    } catch (Exception e) {
+      throw new IOException(e.getMessage());
     }
   }
 
@@ -258,8 +273,9 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
    *
    * @param fieldData
    * @throws IOException
+   * @throws InterruptedException
    */
-  private void writeField(FieldWriter fieldData) throws IOException {
+  private void writeField(FieldWriter fieldData) throws IOException, InterruptedException {
     writeFieldInternal(fieldData.fieldInfo(), fieldData.getByteVectors());
   }
 
@@ -269,8 +285,10 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
    * @param fieldData instance of ScalarQuantizedGPUFieldWriter
    * @param sortMap instance of the DocMap
    * @throws IOException
+   * @throws InterruptedException
    */
-  private void writeSortingField(FieldWriter fieldData, Sorter.DocMap sortMap) throws IOException {
+  private void writeSortingField(FieldWriter fieldData, Sorter.DocMap sortMap)
+      throws IOException, InterruptedException {
 
     DocsWithFieldSet oldDocsWithFieldSet = fieldData.getDocsWithFieldSet();
     final int[] new2OldOrd = new int[oldDocsWithFieldSet.cardinality()]; // new ord to old ord
@@ -381,7 +399,6 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
   @Override
   public void close() throws IOException {
     IOUtils.close(hnswMeta, hnswVectorIndex, flatVectorsWriter);
-    closeCuVSResourcesInstance();
   }
 
   /**
