@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -13,7 +13,7 @@ import org.apache.lucene.codecs.hnsw.FlatVectorsFormat;
 import org.junit.Test;
 
 /**
- * Tests the backward compatibility mechanism.
+ * Tests the backward compatibility mechanism for {@link LuceneProvider}
  *
  * @since 25.12
  */

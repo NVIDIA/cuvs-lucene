@@ -5,7 +5,6 @@
 
 package com.nvidia.cuvs.lucene;
 
-import static com.nvidia.cuvs.lucene.TestUtils.generateDataset;
 import static com.nvidia.cuvs.lucene.ThreadLocalCuVSResourcesProvider.isSupported;
 import static org.apache.lucene.index.VectorSimilarityFunction.EUCLIDEAN;
 
@@ -55,25 +54,26 @@ public class TestMultithreadedCuVSGPUSearch extends LuceneTestCase {
   private static int numQueries;
   private static int topK;
   private static int numThreads;
+  private static TestDataProvider dataProvider;
 
   @BeforeClass
   public static void beforeClass() throws IOException {
     assumeTrue("cuVS not supported", isSupported());
     random = random();
+    dataProvider = new TestDataProvider(random);
     directory = newDirectory(new ByteBuffersDirectory());
     IndexWriterConfig config = new IndexWriterConfig().setCodec(codec);
     IndexWriter writer = new IndexWriter(directory, config);
 
-    int datasetSize = random.nextInt(500, 2000);
-    int dimensions = random.nextInt(64, 256);
+    int datasetSize = dataProvider.getDatasetSize();
     topK = random.nextInt(2, 30);
     log.log(Level.FINE, "Using topK as: " + topK);
     numThreads = random.nextInt(2, 8);
     log.log(Level.FINE, "Generating a dataset with " + datasetSize + " vectors");
-    float[][] dataset = generateDataset(random, datasetSize, dimensions);
+    float[][] dataset = dataProvider.getVectors(datasetSize);
     numQueries = random.nextInt(100, 500);
     log.log(Level.FINE, "Generating a query set with " + numQueries + " queries");
-    float[][] queryVectors = generateDataset(random, numQueries, dimensions);
+    float[][] queryVectors = dataProvider.getQueries(numQueries);
     queries = new ArrayBlockingQueue<>(numQueries, true, Arrays.asList(queryVectors));
 
     log.log(Level.FINE, "Indexing " + datasetSize + " vectors");

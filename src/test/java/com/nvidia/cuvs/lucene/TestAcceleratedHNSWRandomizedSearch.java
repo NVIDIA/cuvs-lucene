@@ -42,11 +42,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 @SuppressSysoutChecks(bugUrl = "")
-public class TestCuVSRandomizedVectorSearch extends LuceneTestCase {
+public class TestAcceleratedHNSWRandomizedSearch extends LuceneTestCase {
 
   private static final Logger log =
-      Logger.getLogger(TestCuVSRandomizedVectorSearch.class.getName());
-
+      Logger.getLogger(TestAcceleratedHNSWRandomizedSearch.class.getName());
   private static Codec codec;
   private static IndexSearcher searcher;
   private static IndexReader reader;
@@ -57,15 +56,17 @@ public class TestCuVSRandomizedVectorSearch extends LuceneTestCase {
   @BeforeClass
   public static void beforeClass() throws Exception {
     assumeTrue("cuVS not supported so skipping these tests", isSupported());
-    codec = TestUtil.alwaysKnnVectorsFormat(new CuVS2510GPUVectorsFormat());
     directory = newDirectory();
     random = random();
     dataProvider = new TestDataProvider(random);
-
+    codec = TestUtil.alwaysKnnVectorsFormat(new Lucene99AcceleratedHNSWVectorsFormat());
     RandomIndexWriter writer = createWriter(random, directory, codec);
+
     int datasetSize = dataProvider.getDatasetSize();
     float[][] dataset = dataProvider.getDataset1();
+    float[][] dataset2 = dataProvider.getDataset2();
 
+    // Add documents
     for (int i = 0; i < datasetSize; i++) {
       Document doc = new Document();
       doc.add(new StringField(ID_FIELD, String.valueOf(i), Field.Store.YES));
@@ -73,12 +74,11 @@ public class TestCuVSRandomizedVectorSearch extends LuceneTestCase {
       boolean skipVector = random.nextInt(10) < 4;
       if (!skipVector || datasetSize < 100) {
         doc.add(new KnnFloatVectorField(VECTOR_FIELD1, dataset[i], EUCLIDEAN));
-        doc.add(new KnnFloatVectorField(VECTOR_FIELD2, dataset[i], EUCLIDEAN));
+        doc.add(new KnnFloatVectorField(VECTOR_FIELD2, dataset2[i], EUCLIDEAN));
       }
-
       writer.addDocument(doc);
     }
-
+    writer.commit();
     reader = writer.getReader();
     searcher = newSearcher(reader);
     writer.close();
@@ -86,6 +86,7 @@ public class TestCuVSRandomizedVectorSearch extends LuceneTestCase {
 
   @Test
   public void testVectorSearch() throws IOException {
+
     float[][] dataset = dataProvider.getDataset1();
     int topK = dataProvider.getTopK();
     int numQueries = dataProvider.getNumQueries();
@@ -116,6 +117,7 @@ public class TestCuVSRandomizedVectorSearch extends LuceneTestCase {
   @Test
   public void testVectorSearchWithFilter() throws IOException {
     // Find a document that has a vector by doing a search first
+
     int topK = dataProvider.getTopK();
     float[] queryVector = dataProvider.getQueries(1)[0];
 
@@ -155,6 +157,5 @@ public class TestCuVSRandomizedVectorSearch extends LuceneTestCase {
     searcher = null;
     reader = null;
     directory = null;
-    log.log(Level.FINE, "Test finished");
   }
 }
