@@ -24,6 +24,7 @@ Four codecs are currently provided:
 ## Installing cuvs-lucene
 
 ### Prerequisites
+
 - [CUDA 12.0+](https://developer.nvidia.com/cuda-toolkit-archive)
 - [JDK 22](https://jdk.java.net/archive/)
 - [Maven 3.9.6+](https://maven.apache.org/download.cgi)
@@ -101,7 +102,9 @@ public class HelloCuvsLucene {
 }
 ```
 
-Run it:
+The artifacts would be built and available in the target / folder.
+
+### Running Tests
 
 ```sh
 mvn -q compile org.codehaus.mojo:exec-maven-plugin:3.5.1:java \

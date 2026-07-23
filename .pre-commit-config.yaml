@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 repos:
@@ -9,8 +9,9 @@ repos:
               - id: trailing-whitespace
               - id: end-of-file-fixer
               - id: check-symlinks
+              - id: check-xml
       - repo: https://github.com/rapidsai/pre-commit-hooks
-        rev: v1.4.2
+        rev: v1.5.1
         hooks:
           - id: verify-copyright
             name: verify-copyright
@@ -23,8 +24,11 @@ repos:
                   meta[.]yaml$|
                   dependencies[.]yaml$|
                   ^[.]pre-commit-config[.]yaml$
+          # TODO: Re-enable once verify-codeowners supports --org parameter
+          # - id: verify-codeowners
+          #   args: [--fix, --org=NVIDIA, --project-prefix=cuvs-lucene]
       - repo: https://github.com/rapidsai/dependency-file-generator
-        rev: v1.20.2
+        rev: v1.21.0
         hooks:
             - id: rapids-dependency-file-generator
               args: ["--clean", "--warn-all", "--strict"]
@@ -32,3 +36,7 @@ repos:
         rev: v0.11.0.1
         hooks:
           - id: shellcheck
+      - repo: https://github.com/zizmorcore/zizmor-pre-commit
+        rev: v1.26.1
+        hooks:
+          - id: zizmor
