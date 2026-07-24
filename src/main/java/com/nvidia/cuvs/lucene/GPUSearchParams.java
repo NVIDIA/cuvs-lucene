@@ -77,7 +77,7 @@ public class GPUSearchParams {
    * @param cagraGraphBuildAlgo The CAGRA build algorithm to use.
    * @param indexType The type of index to build - CAGRA, BRUTEFORCE, or both.
    * @param cuVSIvfPqParams An instance of CuVSIvfPqParams containing IVF_PQ specific parameters.
-   * @param strategy either HEURISTIC [Default] that lets cuVS auto-select the build algorithm and its parameters or CUSTOM that uses the parameters passed though this class.
+   * @param strategy either HEURISTIC [Default] that lets cuVS auto-select the build algorithm and its parameters or CUSTOM that uses the parameters passed through this class.
    * @param cuvsDistanceType the cuvsDistanceType. The default option is L2Expanded.
    * @param nnDescentNumIterations the number of Iterations to run if building with NN_DESCENT.
    */
