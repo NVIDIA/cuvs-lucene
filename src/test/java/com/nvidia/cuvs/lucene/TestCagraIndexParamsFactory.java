@@ -59,6 +59,7 @@ public class TestCagraIndexParamsFactory extends LuceneTestCase {
             .withCagraGraphBuildAlgo(CagraGraphBuildAlgo.NN_DESCENT)
             .withGraphDegree(32)
             .withIntermediateGraphDegree(64)
+            .withWriterThreads(12)
             .build();
 
     CagraIndexParams cagraParams = CagraIndexParamsFactory.create(params);
@@ -67,6 +68,8 @@ public class TestCagraIndexParamsFactory extends LuceneTestCase {
     assertEquals(32, cagraParams.getGraphDegree());
     assertEquals(64, cagraParams.getIntermediateGraphDegree());
     assertNotNull(cagraParams.getCuVSIvfPqParams());
+    // The caller-configured writerThreads must be honored on the CUSTOM path.
+    assertEquals(12, cagraParams.getNumWriterThreads());
   }
 
   /**
