@@ -31,16 +31,20 @@ public class CagraIndexParamsFactory {
         new CagraIndexParams.Builder()
             .withGraphDegree(gpuSearchParams.getGraphdegree())
             .withIntermediateGraphDegree(gpuSearchParams.getIntermediateGraphDegree())
-            .withNumWriterThreads(gpuSearchParams.getWriterThreads())
-            .withNNDescentNumIterations(gpuSearchParams.getnNDescentNumIterations());
+            .withNumWriterThreads(gpuSearchParams.getWriterThreads());
     if (gpuSearchParams.getStrategy().equals(GPUSearchParams.Strategy.HEURISTIC)) {
+      // AUTO_SELECT: cuVS picks the build algorithm and derives its parameters at build time, so
+      // the IVF-PQ params and nn-descent iterations are left to cuVS rather than forwarded here.
       builder
           .withCagraGraphBuildAlgo(CagraGraphBuildAlgo.AUTO_SELECT)
           .withMetric(gpuSearchParams.getCuvsDistanceType());
     } else {
+      // CUSTOM: forward the caller's algorithm and the parameters it consumes -- IVF-PQ params for
+      // IVF_PQ, nn-descent iterations for NN_DESCENT (each is ignored by the other algorithm).
       builder
           .withCagraGraphBuildAlgo(gpuSearchParams.getCagraGraphBuildAlgo())
-          .withCuVSIvfPqParams(gpuSearchParams.getCuVSIvfPqParams());
+          .withCuVSIvfPqParams(gpuSearchParams.getCuVSIvfPqParams())
+          .withNNDescentNumIterations(gpuSearchParams.getnNDescentNumIterations());
     }
     return builder.build();
   }
