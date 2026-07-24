@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -174,6 +174,9 @@ public class LuceneAcceleratedHNSWBinaryQuantizedVectorsWriter extends KnnVector
 
       CuVSMatrix adjacencyListMatrix = cagraIndex.getGraph();
       int size = (int) dataset.size();
+      // The CAGRA graph degree is the adjacency list's column count (the degree cuVS actually
+      // built); it is what the HNSW meta records as the basis for M.
+      int graphDegree = (int) adjacencyListMatrix.columns();
 
       // Create multi-layer HNSW graph from CAGRA
       GPUBuiltHnswGraph hnswGraph =
@@ -184,7 +187,6 @@ public class LuceneAcceleratedHNSWBinaryQuantizedVectorsWriter extends KnnVector
               adjacencyListMatrix,
               vectors,
               acceleratedHNSWParams.getHnswLayers(),
-              acceleratedHNSWParams.getGraphdegree(),
               params,
               QuantizationType.BINARY);
 
@@ -203,7 +205,7 @@ public class LuceneAcceleratedHNSWBinaryQuantizedVectorsWriter extends KnnVector
           size,
           hnswGraph,
           graphLevelNodeOffsets,
-          acceleratedHNSWParams.getGraphdegree());
+          graphDegree);
 
       cagraIndex.close();
 

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -241,8 +241,7 @@ public class CuVS2510GPUVectorsWriter extends KnnVectorsWriter {
    * @throws Throwable
    */
   private void writeCagraIndex(OutputStream os, CuVSMatrix dataset) throws Throwable {
-    CagraIndexParams params =
-        CagraIndexParamsFactory.create(gpuSearchParams, dataset.size(), dataset.columns());
+    CagraIndexParams params = CagraIndexParamsFactory.create(gpuSearchParams);
     CagraIndex index =
         CagraIndex.newBuilder(getCuVSResourcesInstance())
             .withDataset(dataset)

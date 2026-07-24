@@ -7,6 +7,7 @@ package com.nvidia.cuvs.lucene;
 
 import com.nvidia.cuvs.CagraIndexParams.CagraGraphBuildAlgo;
 import com.nvidia.cuvs.CagraIndexParams.CuvsDistanceType;
+import com.nvidia.cuvs.CagraIndexParams.HnswHeuristicType;
 import com.nvidia.cuvs.CuVSIvfPqParams;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -17,9 +18,8 @@ public class AcceleratedHNSWParams {
 
   public static enum Strategy {
     /*
-     * This strategy allows for automatic selection of the underlying CAGRA build algorithm.
-     * With this strategy we use NN_DESCENT for dataset less than 5M vectors, else we use IVF_PQ.
-     * Indexing parameters, especially for IVF_PQ, are heuristically identified automatically.
+     * This strategy delegates the derivation of the CAGRA build parameters (graph degrees, build
+     * algorithm and its parameters) to cuVS, based on HNSW-equivalent maxConn and beamWidth.
      *
      * This is the default and the recommended strategy.
      */
@@ -64,6 +64,8 @@ public class AcceleratedHNSWParams {
   public static final Strategy DEFAULT_STRATEGY = Strategy.HEURISTIC;
   public static final CuvsDistanceType DEFAULT_CUVS_DISTANCE_TYPE = CuvsDistanceType.L2Expanded;
   public static final int DEFAULT_NN_DESCENT_NUM_ITERATIONS = 20;
+  public static final HnswHeuristicType DEFAULT_HNSW_HEURISTIC_TYPE =
+      HnswHeuristicType.SAME_GRAPH_FOOTPRINT;
 
   public static final Supplier<CuVSIvfPqParams> DEFAULT_IVF_PQ_PARAMS =
       () -> {
@@ -95,7 +97,6 @@ public class AcceleratedHNSWParams {
    * @param writerThreads Number of cuVS writer threads to use.
    * @param intermediateGraphDegree The intermediate graph degree while building the CAGRA index.
    * @param graphdegree The graph degree to use while building the CAGRA index.
-   * @param indexType The type of index to build - CAGRA, BRUTEFORCE, or both.
    * @param hnswLayers The number of HNSW layers to build in the HNSW index.
    * @param maxConn The max connection parameter used when building HNSW index with the fallback mechanism.
    * @param beamWidth The beam width parameter used when building HNSW index with the fallback mechanism.
@@ -103,7 +104,7 @@ public class AcceleratedHNSWParams {
    * @param cuVSIvfPqParams An instance of CuVSIvfPqParams containing IVF_PQ specific parameters.
    * @param numMergeWorkers The number of merge workers to use with the fallback mechanism.
    * @param mergeExec The instance of {@link ExecutorService} to use with the fallback mechanism.
-   * @param strategy either HEURISTIC [Default] that automatically chooses build algorithm and its parameters based on data set size or CUSTOM that uses the parameters passed though this class.
+   * @param strategy either HEURISTIC [Default] that delegates the CAGRA build parameters to cuVS (derived from the HNSW-equivalent maxConn and beamWidth) or CUSTOM that uses the parameters passed through this class.
    * @param cuvsDistanceType the cuvsDistanceType. The default option is L2Expanded.
    * @param nnDescentNumIterations the number of Iterations to run if building with NN_DESCENT.
    */
